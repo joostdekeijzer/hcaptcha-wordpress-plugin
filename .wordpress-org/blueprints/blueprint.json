@@ -14,8 +14,8 @@
     {
       "step": "installPlugin",
       "pluginZipFile": {
-        "resource": "url",
-        "url": "https://downloads.wordpress.org/plugin/hcaptcha-for-forms-and-more.4.0.1.zip"
+        "resource": "wordpress.org/plugins",
+        "slug": "hcaptcha-for-forms-and-more"
       },
       "options": {
         "activate": true
@@ -24,8 +24,8 @@
     {
       "step": "installPlugin",
       "pluginZipFile": {
-        "resource": "url",
-        "url": "https://downloads.wordpress.org/plugin/contact-form-7.5.9.3.zip"
+        "resource": "wordpress.org/plugins",
+        "url": "contact-form-7"
       },
       "options": {
         "activate": true
