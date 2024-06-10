@@ -130,7 +130,6 @@ class AAAMainTest extends HCaptchaWPTestCase {
 	 * @dataProvider dp_test_init
 	 * @throws ReflectionException ReflectionException.
 	 * @noinspection PhpUnitTestsInspection
-	 * @noinspection UnnecessaryAssertionInspection
 	 * @noinspection UnusedFunctionResultInspection
 	 */
 	public function test_init_and_init_hooks( bool $logged_in, string $hcaptcha_off_when_logged_in, $whitelisted, bool $hcaptcha_active ) {
@@ -138,8 +137,14 @@ class AAAMainTest extends HCaptchaWPTestCase {
 
 		$hcaptcha = hcaptcha();
 
-		update_option( 'hcaptcha_settings', [ 'site_key' => 'some site key' ] );
-		update_option( 'hcaptcha_settings', [ 'secret_key' => 'some secret key' ] );
+		update_option(
+			'hcaptcha_settings',
+			[
+				'site_key'           => 'some site key',
+				'secret_key'         => 'some secret key',
+				'off_when_logged_in' => 'on' === $hcaptcha_off_when_logged_in ? [ 'on' ] : [],
+			]
+		);
 
 		// Init plugin to update settings.
 		do_action( 'plugins_loaded' );
@@ -176,12 +181,6 @@ class AAAMainTest extends HCaptchaWPTestCase {
 
 		if ( $logged_in ) {
 			wp_set_current_user( 1 );
-		}
-
-		if ( 'on' === $hcaptcha_off_when_logged_in ) {
-			update_option( 'hcaptcha_settings', [ 'off_when_logged_in' => [ 'on' ] ] );
-		} else {
-			update_option( 'hcaptcha_settings', [ 'off_when_logged_in' => [] ] );
 		}
 
 		$subject = new Main();
@@ -411,8 +410,7 @@ class AAAMainTest extends HCaptchaWPTestCase {
 	 */
 	public function test_csp_headers() {
 		$headers  = [
-			'some_header'             => 'some header content',
-			'Content-Security-Policy' => "default-src 'self'",
+			'some_header' => 'some header content',
 		];
 		$expected = $headers;
 		$hcap_csp = "'self' 'unsafe-inline' 'unsafe-eval' https://hcaptcha.com https://*.hcaptcha.com";
@@ -424,26 +422,67 @@ class AAAMainTest extends HCaptchaWPTestCase {
 			"connect-src $hcap_csp; " .
 			"default-src 'self'";
 
+		$subject = new Main();
+
+		// The 'hcap_add_csp_headers' filter is not added.
+		self::assertSame( $headers, $subject->csp_headers( $headers ) );
+
 		add_filter(
 			'hcap_add_csp_headers',
-			static function ( $add, $h ) use ( $headers ) {
+			static function ( $add, $h ) use ( &$headers ) {
 				return $h === $headers;
 			},
 			10,
 			2
 		);
 
-		$subject = new Main();
+		// The 'Content-Security-Policy' key is not in headers.
+		self::assertSame( $headers, $subject->csp_headers( $headers ) );
 
+		$headers = [
+			'some_header'             => 'some header content',
+			'Content-Security-Policy' => "default-src 'self'",
+		];
+
+		// The 'Content-Security-Policy' key is in headers.
 		self::assertSame( $expected, $subject->csp_headers( $headers ) );
 	}
 
 	/**
 	 * Test print_inline_styles().
 	 *
+	 * @param string|false $custom_themes Custom themes option value.
+	 *
+	 * @dataProvider dp_test_print_inline_styles
 	 * @noinspection CssUnusedSymbol
 	 */
-	public function test_print_inline_styles() {
+	public function test_print_inline_styles( $custom_themes ) {
+		$license       = 'pro';
+		$bg            = '#f0f0f0';
+		$config_params = 'on' === $custom_themes
+			? [
+				'theme' => [
+					'component' => [
+						'checkbox' => [
+							'main' => [
+								'fill' => $bg,
+							],
+						],
+					],
+				],
+			]
+			: [];
+
+		update_option(
+			'hcaptcha_settings',
+			[
+				'custom_themes' => $custom_themes ? [ $custom_themes ] : [],
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode
+				'config_params' => json_encode( $config_params ),
+				'license'       => $license,
+			]
+		);
+
 		$div_logo_url       = HCAPTCHA_URL . '/assets/images/hcaptcha-div-logo.svg';
 		$div_logo_url_white = HCAPTCHA_URL . '/assets/images/hcaptcha-div-logo-white.svg';
 
@@ -537,15 +576,37 @@ class AAAMainTest extends HCaptchaWPTestCase {
 	}
 CSS;
 
+		if ( $custom_themes ) {
+			$expected .= <<<CSS
+	.h-captcha::before {
+		background-color: $bg !important;	
+	}
+CSS;
+		}
+
 		$expected = "<style>\n$expected\n</style>\n";
 
 		$subject = new Main();
+
+		$subject->init_hooks();
 
 		ob_start();
 
 		$subject->print_inline_styles();
 
 		self::assertSame( $expected, ob_get_clean() );
+	}
+
+	/**
+	 * Data provider for test_print_inline_styles().
+	 *
+	 * @return array
+	 */
+	public function dp_test_print_inline_styles(): array {
+		return [
+			[ false ],
+			[ 'on' ],
+		];
 	}
 
 	/**

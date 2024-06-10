@@ -75,11 +75,11 @@ class SystemInfoTest extends HCaptchaTestCase {
 	public function test_admin_enqueue_scripts() {
 		$plugin_url     = 'http://test.test/wp-content/plugins/hcaptcha-wordpress-plugin';
 		$plugin_version = '1.0.0';
-		$min_prefix     = '.min';
+		$min_suffix     = '.min';
 		$subject        = Mockery::mock( SystemInfo::class )->makePartial();
 
 		$subject->shouldAllowMockingProtectedMethods();
-		$this->set_protected_property( $subject, 'min_prefix', $min_prefix );
+		$this->set_protected_property( $subject, 'min_suffix', $min_suffix );
 
 		FunctionMocker::replace(
 			'constant',
@@ -98,9 +98,28 @@ class SystemInfoTest extends HCaptchaTestCase {
 
 		WP_Mock::userFunction( 'wp_enqueue_script' )
 			->with(
-				SystemInfo::HANDLE,
-				$plugin_url . "/assets/js/system-info$min_prefix.js",
+				SystemInfo::DIALOG_HANDLE,
+				$plugin_url . "/assets/js/kagg-dialog$min_suffix.js",
 				[],
+				$plugin_version,
+				true
+			)
+			->once();
+
+		WP_Mock::userFunction( 'wp_enqueue_style' )
+			->with(
+				SystemInfo::DIALOG_HANDLE,
+				$plugin_url . "/assets/css/kagg-dialog$min_suffix.css",
+				[],
+				$plugin_version
+			)
+			->once();
+
+		WP_Mock::userFunction( 'wp_enqueue_script' )
+			->with(
+				SystemInfo::HANDLE,
+				$plugin_url . "/assets/js/system-info$min_suffix.js",
+				[ SystemInfo::DIALOG_HANDLE ],
 				$plugin_version,
 				true
 			)
@@ -111,7 +130,9 @@ class SystemInfoTest extends HCaptchaTestCase {
 				SystemInfo::HANDLE,
 				SystemInfo::OBJECT,
 				[
-					'copiedMsg' => 'System info copied to clipboard.',
+					'successMsg' => 'System info copied to the clipboard.',
+					'errorMsg'   => 'Cannot copy info to the clipboard.',
+					'OKBtnText'  => 'OK',
 				]
 			)
 			->once();
@@ -119,8 +140,8 @@ class SystemInfoTest extends HCaptchaTestCase {
 		WP_Mock::userFunction( 'wp_enqueue_style' )
 			->with(
 				SystemInfo::HANDLE,
-				$plugin_url . "/assets/css/system-info$min_prefix.css",
-				[ PluginSettingsBase::PREFIX . '-' . SettingsBase::HANDLE ],
+				$plugin_url . "/assets/css/system-info$min_suffix.css",
+				[ PluginSettingsBase::PREFIX . '-' . SettingsBase::HANDLE, SystemInfo::DIALOG_HANDLE ],
 				$plugin_version
 			)
 			->once();
@@ -135,9 +156,13 @@ class SystemInfoTest extends HCaptchaTestCase {
 	 */
 	public function test_section_callback() {
 		$subject  = Mockery::mock( SystemInfo::class )->makePartial();
-		$expected = '		<h2>
-			System Information		</h2>
-		<div id="hcaptcha-system-info-wrap">
+		$expected = '		<div class="hcaptcha-header-bar">
+			<div class="hcaptcha-header">
+				<h2>
+					System Info				</h2>
+			</div>
+					</div>
+				<div id="hcaptcha-system-info-wrap">
 			<span class="helper">
 				<span class="helper-content">Copy system info to clipboard</span>
 			</span>
@@ -353,6 +378,8 @@ Elementor Pro:
 Essential Addons:                     
   Login:                              Off
   Register:                           Off
+Essential Blocks:                     
+  Form:                               Off
 Fluent Forms:                         
   Form:                               On
 Formidable Forms:                     

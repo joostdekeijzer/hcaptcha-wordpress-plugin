@@ -1,5 +1,39 @@
+= 4.2.1 =
+* Fixed message layout on the General and Integrations pages.
+* Fixed processing of WooCommerce Register form.
+
+= 4.2.0 =
+* The minimum required WordPress version is now 5.3.
+* Added support for Multisite Network Admin synced with network-wide plugin options.
+* Added selection by date range on Forms and Events pages.
+* Added automatic activation of dependent plugins on the Integrations page.
+* Added scrolling on the Integrations page during the search.
+* Fixed color flickering of hCaptcha placeholder with custom themes.
+* Fixed JS error on the Lost Password page.
+* Fixed missing site key notification on the General page.
+* Fixed fatal error on some sites during migration to 4.0.0.
+
+= 4.1.2 =
+* Added option to have the hCaptcha admin menu under Settings.
+* Fixed the General admin page on the mobile.
+* Fixed Forms and Events admin pages on the mobile.
+
+= 4.1.1 =
+* Added updating of the Custom Themes properties on the General page upon manual editing of the Config Params JSON.
+* Fixed a possible fatal error with third-party plugins using a Jetpack library.
+
+= 4.1.0 =
+* Added Essential Blocks integration.
+* Added hideable columns to Forms and Events tables.
+* Admin menu moved to the toplevel with subpages.
+* Added a filter to change admin menu appearance.
+* Add modern dialog to the System Info admin page.
+* Add modern dialog to the Gravity Forms edit page.
+* Add modern dialog to the Ninja Forms edit page.
+* Tested with WooCommerce 8.8.
+
 = 4.0.1 =
-* Improved appearance of Forms and Events pages.
+* Added pagination to the Forms and Events pages.
 * Fixed PHP notice on the Forms page.
 
 = 4.0.0 =

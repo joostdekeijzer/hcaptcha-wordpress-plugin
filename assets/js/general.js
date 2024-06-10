@@ -103,7 +103,10 @@ const general = function( $ ) {
 	}
 
 	function getCleanConsoleLogs() {
-		const ignore = [ 'recaptchacompat disabled' ];
+		const ignore = [
+			'recaptchacompat disabled',
+			'Missing sitekey - https://hcaptcha.com/docs/configuration#jsapi',
+		];
 		const logs = [];
 
 		for ( let i = 0; i < consoleLogs.length; i++ ) {
@@ -148,7 +151,7 @@ const general = function( $ ) {
 
 	function clearMessage() {
 		$message.remove();
-		$( '<div id="hcaptcha-message"></div>' ).insertAfter( '#hcaptcha-options h2' );
+		$( '<div id="hcaptcha-message"></div>' ).insertAfter( '.hcaptcha-header-bar' );
 		$message = $( msgSelector );
 	}
 
@@ -200,6 +203,14 @@ const general = function( $ ) {
 		const sampleHCaptcha = document.querySelector( '#hcaptcha-options .h-captcha' );
 		sampleHCaptcha.innerHTML = '';
 
+		// Map the theme to the palette mode.
+		params.theme = params?.theme?.palette?.mode;
+
+		if ( ! params.theme ) {
+			// Remove the theme if it's not set.
+			delete params.theme;
+		}
+
 		for ( const key in params ) {
 			sampleHCaptcha.setAttribute( `data-${ key }`, `${ params[ key ] }` );
 		}
@@ -230,6 +241,31 @@ const general = function( $ ) {
 		return target;
 	}
 
+	function syncConfigParams( configParams, parentKey = '' ) {
+		for ( const key in configParams ) {
+			// Construct the full key path.
+			const fullKey = parentKey ? `${ parentKey }--${ key }` : key;
+
+			// If the value is an object, recursively print its keys.
+			if ( typeof configParams[ key ] === 'object' && configParams[ key ] !== null ) {
+				syncConfigParams( configParams[ key ], fullKey );
+			} else {
+				// Update the custom property selector.
+				const value = configParams[ key ];
+				const propKey = fullKey.replace( /theme--/g, '' );
+				const newValue = `${ propKey }=${ value }`;
+				const $prop = $customProp.find( `option[value*="${ propKey }="]` );
+
+				if ( $prop.length === 1 ) {
+					$prop.attr( 'value', newValue );
+					if ( $prop.is( ':selected' ) ) {
+						$customValue.val( value );
+					}
+				}
+			}
+		}
+	}
+
 	function applyCustomThemes( params = {} ) {
 		let configParamsJson = $configParams.val().trim();
 		let configParams;
@@ -249,6 +285,8 @@ const general = function( $ ) {
 		configParams = deepMerge( configParams, params );
 
 		$configParams.val( JSON.stringify( configParams, null, 2 ) );
+
+		syncConfigParams( configParams );
 
 		if ( ! $customThemes.prop( 'checked' ) ) {
 			configParams = {

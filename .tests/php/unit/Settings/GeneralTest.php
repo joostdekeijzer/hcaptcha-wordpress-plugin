@@ -40,7 +40,7 @@ class GeneralTest extends HCaptchaTestCase {
 	 * @return void
 	 */
 	public function tearDown(): void { // phpcs:ignore PHPCompatibility.FunctionDeclarations.NewReturnTypeDeclarations.voidFound
-		unset( $_POST['mode'], $_POST['siteKey'], $_POST['secretKey'], $_POST['h-captcha-response'], $_POST['section'], $_POST['status'] );
+		unset( $_POST );
 
 		parent::tearDown();
 	}
@@ -75,8 +75,8 @@ class GeneralTest extends HCaptchaTestCase {
 		$subject          = Mockery::mock( General::class )->makePartial();
 
 		$subject->shouldAllowMockingProtectedMethods();
-		$subject->shouldReceive( 'is_options_screen' )->andReturn( true );
 		$subject->shouldReceive( 'plugin_basename' )->andReturn( $plugin_base_name );
+		$subject->shouldReceive( 'is_tab_active' )->with( $subject )->andReturn( false );
 
 		WP_Mock::userFunction( 'hcaptcha' )->with()->once()->andReturn( $hcaptcha );
 
@@ -90,7 +90,9 @@ class GeneralTest extends HCaptchaTestCase {
 
 		WP_Mock::expectFilterAdded( 'pre_update_option_' . $option_name, [ $subject, 'maybe_send_stats' ], 20, 2 );
 
-		$subject->init_hooks();
+		$method = 'init_hooks';
+
+		$subject->$method();
 	}
 
 	/**
@@ -248,9 +250,13 @@ class GeneralTest extends HCaptchaTestCase {
 		return [
 			'keys'       => [
 				General::SECTION_KEYS,
-				'				<h2>
+				'		<div class="hcaptcha-header-bar">
+			<div class="hcaptcha-header">
+				<h2>
 					General				</h2>
-				<div id="hcaptcha-message"></div>
+			</div>
+					</div>
+						<div id="hcaptcha-message"></div>
 						<h3 class="hcaptcha-section-keys">
 			<span class="hcaptcha-section-header-title">
 				Keys			</span>
@@ -321,7 +327,7 @@ class GeneralTest extends HCaptchaTestCase {
 	public function test_admin_enqueue_scripts() {
 		$plugin_url          = 'http://test.test/wp-content/plugins/hcaptcha-wordpress-plugin';
 		$plugin_version      = '1.0.0';
-		$min_prefix          = '.min';
+		$min_suffix          = '.min';
 		$ajax_url            = 'https://test.test/wp-admin/admin-ajax.php';
 		$nonce               = 'some_nonce';
 		$site_key            = 'some key';
@@ -337,7 +343,7 @@ class GeneralTest extends HCaptchaTestCase {
 
 		$subject = Mockery::mock( General::class )->makePartial();
 		$subject->shouldAllowMockingProtectedMethods();
-		$this->set_protected_property( $subject, 'min_prefix', $min_prefix );
+		$this->set_protected_property( $subject, 'min_suffix', $min_suffix );
 
 		FunctionMocker::replace(
 			'constant',
@@ -359,7 +365,7 @@ class GeneralTest extends HCaptchaTestCase {
 		WP_Mock::userFunction( 'wp_enqueue_script' )
 			->with(
 				General::DIALOG_HANDLE,
-				$plugin_url . "/assets/js/kagg-dialog$min_prefix.js",
+				$plugin_url . "/assets/js/kagg-dialog$min_suffix.js",
 				[],
 				$plugin_version,
 				true
@@ -369,7 +375,7 @@ class GeneralTest extends HCaptchaTestCase {
 		WP_Mock::userFunction( 'wp_enqueue_script' )
 			->with(
 				General::HANDLE,
-				$plugin_url . "/assets/js/general$min_prefix.js",
+				$plugin_url . "/assets/js/general$min_suffix.js",
 				[ 'jquery', General::DIALOG_HANDLE ],
 				$plugin_version,
 				true
@@ -421,7 +427,7 @@ class GeneralTest extends HCaptchaTestCase {
 		WP_Mock::userFunction( 'wp_enqueue_style' )
 			->with(
 				General::DIALOG_HANDLE,
-				$plugin_url . "/assets/css/kagg-dialog$min_prefix.css",
+				$plugin_url . "/assets/css/kagg-dialog$min_suffix.css",
 				[],
 				$plugin_version
 			)
@@ -430,7 +436,7 @@ class GeneralTest extends HCaptchaTestCase {
 		WP_Mock::userFunction( 'wp_enqueue_style' )
 			->with(
 				General::HANDLE,
-				$plugin_url . "/assets/css/general$min_prefix.css",
+				$plugin_url . "/assets/css/general$min_suffix.css",
 				[ PluginSettingsBase::PREFIX . '-' . SettingsBase::HANDLE, General::DIALOG_HANDLE ],
 				$plugin_version
 			)

@@ -207,7 +207,7 @@ class Notifications {
 			'events_page'         => [
 				'title'   => __( 'Events admin page', 'hcaptcha-for-forms-and-more' ),
 				'message' => sprintf(
-				/* translators: 1: statistics switch link, 2: the 'forms' page link. */
+				/* translators: 1: statistics switch link, 2: Pro link, 3: the 'forms' page link. */
 					__( '%1$s events statistics and %2$s to %3$s complete statistics on form events.', 'hcaptcha-for-forms-and-more' ),
 					sprintf(
 						'<a href="%1$s" target="_blank">%2$s</a>',
@@ -247,7 +247,7 @@ class Notifications {
 			unset( $this->notifications['register'] );
 		}
 
-		if ( hcaptcha()->is_pro() ) {
+		if ( $settings->is_pro() ) {
 			unset( $this->notifications['pro-free-trial'] );
 		}
 
@@ -282,6 +282,7 @@ class Notifications {
 
 			if ( $this->shuffle ) {
 				$notifications = $this->shuffle_assoc( $notifications );
+				$notifications = $this->make_key_first( $notifications, 'register' );
 			}
 
 			foreach ( $notifications as $id => $notification ) {
@@ -472,5 +473,26 @@ class Notifications {
 		}
 
 		return $new_arr;
+	}
+
+	/**
+	 * Make a key the first element in an associative array.
+	 *
+	 * @param array  $arr An array.
+	 * @param string $key Key.
+	 *
+	 * @return array
+	 */
+	protected function make_key_first( array $arr, string $key ): array {
+		if ( ! array_key_exists( $key, $arr ) ) {
+			return $arr;
+		}
+
+		// Remove the key-value pair from the original array.
+		$value = $arr[ $key ];
+		unset( $arr[ $key ] );
+
+		// Merge the key-value pair back into the array at the beginning.
+		return array_merge( [ $key => $value ], $arr );
 	}
 }

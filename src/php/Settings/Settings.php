@@ -30,7 +30,7 @@ class Settings implements SettingsInterface {
 	 *
 	 * @var array
 	 */
-	protected $menu_pages_classes;
+	protected $menu_groups;
 
 	/**
 	 * Menu pages and tabs in one flat array.
@@ -40,20 +40,12 @@ class Settings implements SettingsInterface {
 	protected $tabs = [];
 
 	/**
-	 * Screen ids of pages and tabs.
-	 *
-	 * @var array
-	 */
-	protected $screen_ids = [];
-
-	/**
 	 * Settings constructor.
 	 *
-	 * @param array $menu_pages_classes Menu pages.
+	 * @param array $menu_groups Menu items.
 	 */
-	public function __construct( array $menu_pages_classes = [] ) {
-		// Allow to specify $menu_pages_classes item as one class, not an array.
-		$this->menu_pages_classes = $menu_pages_classes;
+	public function __construct( array $menu_groups = [] ) {
+		$this->menu_groups = $menu_groups;
 
 		$this->init();
 	}
@@ -62,23 +54,22 @@ class Settings implements SettingsInterface {
 	 * Init class.
 	 */
 	protected function init() {
-		foreach ( $this->menu_pages_classes as $menu_page_classes ) {
-			$tab_classes = (array) $menu_page_classes;
+		foreach ( $this->menu_groups as $menu_group ) {
+			$classes = (array) ( $menu_group['classes'] ?? [] );
+			$args    = $menu_group['args'] ?? [];
 
-			// Allow specifying menu page as one class, without tabs.
-			$page_class  = $tab_classes[0];
-			$tab_classes = array_slice( $tab_classes, 1 );
+			$page_class  = $classes[0];
+			$tab_classes = array_slice( $classes, 1 );
+			$tabs        = [];
 
-			$tabs = [];
 			foreach ( $tab_classes as $tab_class ) {
 				/**
 				 * Tab.
 				 *
 				 * @var PluginSettingsBase $tab
 				 */
-				$tab                = new $tab_class( null );
-				$tabs[]             = $tab;
-				$this->screen_ids[] = $tab->screen_id();
+				$tab    = new $tab_class( null, $args );
+				$tabs[] = $tab;
 			}
 
 			/**
@@ -86,13 +77,13 @@ class Settings implements SettingsInterface {
 			 *
 			 * @var PluginSettingsBase $page_class
 			 */
-			$menu_page = new $page_class( $tabs );
+			$menu_page = new $page_class( $tabs, $args );
 
 			$this->tabs[] = [ $menu_page ];
 			$this->tabs[] = $tabs;
 		}
 
-		$this->tabs = array_merge( [], ...$this->tabs );
+		$this->tabs = array_merge( [], ...array_filter( $this->tabs ) );
 	}
 
 	/**
@@ -113,6 +104,33 @@ class Settings implements SettingsInterface {
 		$first_tab = $this->tabs[0] ?? null;
 
 		return $first_tab ? $first_tab->get_active_tab()->tab_name() : '';
+	}
+
+	/**
+	 * Check if it is a Pro account.
+	 *
+	 * @return false
+	 */
+	public function is_pro(): bool {
+		return 'pro' === $this->get_license();
+	}
+
+	/**
+	 * Check if it is a Pro account or General admin page.
+	 *
+	 * @return bool
+	 */
+	public function is_pro_or_general(): bool {
+		return $this->is_pro() || ( is_admin() && 'General' === $this->get_active_tab_name() );
+	}
+
+	/**
+	 * Get config params.
+	 *
+	 * @return array
+	 */
+	public function get_config_params(): array {
+		return (array) ( json_decode( $this->get( 'config_params' ), true ) ?: [] );
 	}
 
 	/**
@@ -273,13 +291,18 @@ class Settings implements SettingsInterface {
 	 * @return string
 	 */
 	public function get_theme(): string {
+		$theme = $this->get( 'theme' );
+
+		if ( $this->is_on( 'custom_themes' ) && $this->is_pro_or_general() ) {
+			$theme = $this->get_config_params()['theme']['palette']['mode'] ?? $theme;
+		}
 
 		/**
 		 * Filters the current theme to get a relevant key pair.
 		 *
 		 * @param string $mode Current theme.
 		 */
-		return (string) apply_filters( 'hcap_theme', $this->get( 'theme' ) );
+		return (string) apply_filters( 'hcap_theme', $theme );
 	}
 
 	/**
@@ -537,15 +560,5 @@ class Settings implements SettingsInterface {
 				break;
 			}
 		}
-	}
-
-	/**
-	 * Get screen ids of all settings pages and tabs.
-	 *
-	 * @return array
-	 * @noinspection PhpUnused
-	 */
-	public function screen_ids(): array {
-		return $this->screen_ids;
 	}
 }

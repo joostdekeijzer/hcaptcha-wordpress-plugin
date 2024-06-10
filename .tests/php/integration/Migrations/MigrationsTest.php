@@ -113,12 +113,6 @@ class MigrationsTest extends HCaptchaWPTestCase {
 			'woocommerce_wishlists_status' => [],
 			'wpforms_status'               => [ 'form' ],
 			'wpforo_status'                => [],
-			'force'                        => [],
-			'custom_themes'                => [],
-			'statistics'                   => [],
-			'collect_ip'                   => [],
-			'collect_ua'                   => [],
-			'_network_wide'                => [],
 		];
 
 		update_option( 'hcaptcha_size', $size );
@@ -201,7 +195,7 @@ class MigrationsTest extends HCaptchaWPTestCase {
 		$table_name      = Events::TABLE_NAME;
 		$charset_collate = $wpdb->get_charset_collate();
 		$actual_query    = '';
-		$expected_query  = "CREATE TABLE IF NOT EXISTS $wpdb->prefix$table_name (
+		$expected_query  = "CREATE TABLE $wpdb->prefix$table_name (
 		    id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
 		    source      VARCHAR(256)    NOT NULL,
 		    form_id     VARCHAR(20)     NOT NULL,

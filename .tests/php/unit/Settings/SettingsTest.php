@@ -36,14 +36,14 @@ class SettingsTest extends HCaptchaTestCase {
 	/**
 	 * Test constructor.
 	 *
-	 * @param array|null $menu_pages_classes Menu pages classes.
+	 * @param array|null $menu_groups Menu pages classes.
 	 *
 	 * @return void
 	 * @throws ReflectionException ReflectionException.
 	 * @dataProvider dp_test_constructor
 	 * @noinspection PhpMissingParamTypeInspection
 	 */
-	public function test_constructor( $menu_pages_classes ) {
+	public function test_constructor( $menu_groups ) {
 		$class_name = Settings::class;
 
 		$subject = Mockery::mock( $class_name )->makePartial()->shouldAllowMockingProtectedMethods();
@@ -53,15 +53,15 @@ class SettingsTest extends HCaptchaTestCase {
 
 		self::assertNotNull( $constructor );
 
-		if ( null === $menu_pages_classes ) {
-			$menu_pages_classes = [];
+		if ( null === $menu_groups ) {
+			$menu_groups = [];
 
 			$constructor->invoke( $subject );
 		} else {
-			$constructor->invoke( $subject, $menu_pages_classes );
+			$constructor->invoke( $subject, $menu_groups );
 		}
 
-		self::assertSame( $menu_pages_classes, $this->get_protected_property( $subject, 'menu_pages_classes' ) );
+		self::assertSame( $menu_groups, $this->get_protected_property( $subject, 'menu_groups' ) );
 	}
 
 	/**
@@ -83,23 +83,22 @@ class SettingsTest extends HCaptchaTestCase {
 	 * @throws ReflectionException ReflectionException.
 	 */
 	public function test_init() {
-		$screen_ids = [ ( new IntegrationsStub() )->screen_id() ];
-		$subject    = Mockery::mock( Settings::class )->makePartial()->shouldAllowMockingProtectedMethods();
-		$method     = 'init';
+		$subject = Mockery::mock( Settings::class )->makePartial()->shouldAllowMockingProtectedMethods();
+		$method  = 'init';
 
-		$menu_page_classes = [
-			'hCaptcha' => [ GeneralStub::class, IntegrationsStub::class ],
+		$menu_groups = [
+			'hCaptcha' => [
+				'classes' => [ GeneralStub::class, IntegrationsStub::class ],
+			],
 		];
 
-		$this->set_protected_property( $subject, 'menu_pages_classes', $menu_page_classes );
+		$this->set_protected_property( $subject, 'menu_groups', $menu_groups );
 
 		$subject->$method();
 
 		foreach ( $this->get_protected_property( $subject, 'tabs' ) as $key => $tab ) {
-			self::assertInstanceOf( $menu_page_classes['hCaptcha'][ $key ], $tab );
+			self::assertInstanceOf( $menu_groups['hCaptcha']['classes'][ $key ], $tab );
 		}
-
-		self::assertSame( $screen_ids, $this->get_protected_property( $subject, 'screen_ids' ) );
 	}
 
 	/**
@@ -137,6 +136,100 @@ class SettingsTest extends HCaptchaTestCase {
 		$this->set_protected_property( $subject, 'tabs', $tabs );
 
 		self::assertSame( $general_tab_name, $subject->get_active_tab_name() );
+	}
+
+	/**
+	 * Test get_tabs_names().
+	 *
+	 * @return void
+	 */
+	public function test_is_pro() {
+		$license = 'free';
+
+		$subject = Mockery::mock( Settings::class )->makePartial();
+		$subject->shouldReceive( 'get_license' )
+			->with()->andReturnUsing(
+				static function () use ( &$license ) {
+					return $license;
+				}
+			);
+
+		self::assertFalse( $subject->is_pro() );
+
+		$license = 'pro';
+
+		self::assertTrue( $subject->is_pro() );
+	}
+
+	/**
+	 * Test is_pro_or_general().
+	 *
+	 * @param bool $is_pro     Is pro.
+	 * @param bool $is_general Is general.
+	 * @param bool $is_admin   Is admin.
+	 * @param bool $expected   Expected.
+	 *
+	 * @return void
+	 * @dataProvider dp_test_is_pro_or_general
+	 */
+	public function test_is_pro_or_general( bool $is_pro, bool $is_general, bool $is_admin, bool $expected ) {
+		$active_tab_name = $is_general ? 'General' : 'some';
+
+		$subject = Mockery::mock( Settings::class )->makePartial();
+		$subject->shouldReceive( 'is_pro' )->andReturn( $is_pro );
+		$subject->shouldReceive( 'get_active_tab_name' )->andReturn( $active_tab_name );
+
+		WP_Mock::userFunction( 'is_admin' )->andReturn( $is_admin );
+
+		self::assertSame( $subject->is_pro_or_general(), $expected );
+	}
+
+	/**
+	 * Data provider for test_is_pro_or_general().
+	 *
+	 * @return array
+	 */
+	public function dp_test_is_pro_or_general(): array {
+		return [
+			[ true, true, true, true ],
+			[ true, true, false, true ],
+			[ true, false, true, true ],
+			[ true, false, false, true ],
+			[ false, true, true, true ],
+			[ false, true, false, false ],
+			[ false, false, true, false ],
+			[ false, false, false, false ],
+		];
+	}
+
+	/**
+	 * Test get_config_params().
+	 *
+	 * @param mixed $config_params Config params.
+	 * @param array $expected      Expected.
+	 *
+	 * @return void
+	 * @dataProvider dp_test_get_config_params
+	 */
+	public function test_get_config_params( $config_params, array $expected ) {
+		$subject = Mockery::mock( Settings::class )->makePartial();
+		$subject->shouldReceive( 'get' )->with( 'config_params' )->andReturn( $config_params );
+
+		self::assertSame( $expected, $subject->get_config_params( $config_params ) );
+	}
+
+	/**
+	 * Data provider for test_get_config_params().
+	 *
+	 * @return array
+	 */
+	public function dp_test_get_config_params(): array {
+		return [
+			[ null, [] ],
+			[ '', [] ],
+			[ 'some string', [] ],
+			[ '{"some":"object"}', [ 'some' => 'object' ] ],
+		];
 	}
 
 	/**
@@ -183,7 +276,7 @@ class SettingsTest extends HCaptchaTestCase {
 		$general->shouldReceive( 'get_tabs' )->andReturn( [ $integrations ] );
 		$integrations->shouldReceive( 'get_tabs' )->andReturn( null );
 
-		$menu_pages_classes = [
+		$menu_groups = [
 			'hCaptcha' => [ General::class, Integrations::class ],
 		];
 
@@ -191,7 +284,7 @@ class SettingsTest extends HCaptchaTestCase {
 
 		$tabs = [ $general, $integrations ];
 		$this->set_protected_property( $subject, 'tabs', $tabs );
-		$this->set_protected_property( $subject, 'menu_pages_classes', $menu_pages_classes );
+		$this->set_protected_property( $subject, 'menu_groups', $menu_groups );
 
 		self::assertSame( $general_value, $subject->get( $general_key ) );
 		self::assertSame( $integrations_value, $subject->get( $integrations_key ) );
@@ -410,16 +503,52 @@ class SettingsTest extends HCaptchaTestCase {
 
 	/**
 	 * Test get_theme().
+	 *
+	 * @param bool $is_custom         Is custom.
+	 * @param bool $is_pro_or_general Is pro or general.
+	 *
+	 * @return void
+	 * @dataProvider dp_test_get_theme
 	 */
-	public function test_get_theme() {
-		$theme   = 'some theme';
+	public function test_get_theme( bool $is_custom, bool $is_pro_or_general ) {
+		$theme         = 'some theme';
+		$config_theme  = 'some config theme';
+		$config_params = [
+			'theme' => [
+				'palette' => [
+					'mode' => $config_theme,
+				],
+			],
+		];
+		$expected      = $theme;
+
 		$subject = Mockery::mock( Settings::class )->makePartial();
-
 		$subject->shouldReceive( 'get' )->with( 'theme' )->andReturn( $theme );
+		$subject->shouldReceive( 'is_on' )->with( 'custom_themes' )->andReturn( $is_custom );
+		$subject->shouldReceive( 'is_pro_or_general' )->with()->andReturn( $is_pro_or_general );
 
-		WP_Mock::expectFilter( 'hcap_theme', $theme );
+		if ( $is_custom && $is_pro_or_general ) {
+			$subject->shouldReceive( 'get_config_params' )->with()->andReturn( $config_params );
+			$expected = $config_theme;
+		}
 
-		self::assertSame( $theme, $subject->get_theme() );
+		WP_Mock::expectFilter( 'hcap_theme', $expected );
+
+		self::assertSame( $expected, $subject->get_theme() );
+	}
+
+	/**
+	 * Data provider for test_get_theme().
+	 *
+	 * @return array
+	 */
+	public function dp_test_get_theme(): array {
+		return [
+			[ false, false ],
+			[ false, true ],
+			[ true, false ],
+			[ true, true ],
+		];
 	}
 
 	/**
@@ -739,19 +868,5 @@ class SettingsTest extends HCaptchaTestCase {
 				[ true, true ],
 			],
 		];
-	}
-
-	/**
-	 * Test screen_ids().
-	 *
-	 * @throws ReflectionException ReflectionException.
-	 */
-	public function test_screen_ids() {
-		$screen_ids = [ 'general-screen-id', 'integrations-screen-id' ];
-		$subject    = Mockery::mock( Settings::class )->makePartial();
-
-		$this->set_protected_property( $subject, 'screen_ids', $screen_ids );
-
-		self::assertSame( $screen_ids, $subject->screen_ids() );
 	}
 }

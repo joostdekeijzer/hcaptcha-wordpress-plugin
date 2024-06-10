@@ -370,9 +370,18 @@ class General extends PluginSettingsBase {
 				'type'    => 'checkbox',
 				'section' => self::SECTION_APPEARANCE,
 				'options' => [
-					'on' => __( 'Force hCaptcha', 'hcaptcha-for-forms-and-more' ),
+					'on' => __( 'Force', 'hcaptcha-for-forms-and-more' ),
 				],
 				'helper'  => __( 'Force hCaptcha check before submit.', 'hcaptcha-for-forms-and-more' ),
+			],
+			'menu_position'        => [
+				'label'   => __( 'Tabs Menu Under Settings', 'hcaptcha-for-forms-and-more' ),
+				'type'    => 'checkbox',
+				'section' => self::SECTION_APPEARANCE,
+				'options' => [
+					'on' => __( 'Tabs', 'hcaptcha-for-forms-and-more' ),
+				],
+				'helper'  => __( 'When on, the hCaptcha admin menu is placed under Settings.', 'hcaptcha-for-forms-and-more' ),
 			],
 			'custom_themes'        => [
 				'label'   => __( 'Custom Themes', 'hcaptcha-for-forms-and-more' ),
@@ -577,9 +586,10 @@ class General extends PluginSettingsBase {
 			$this->form_fields['secret_key']['disabled'] = true;
 		}
 
-		$custom_theme  = $settings->get( 'config_params' )['theme'] ?? [];
+		$config_params = $settings->get_config_params();
+		$custom_theme  = $config_params['theme'] ?? [];
 		$default_theme = $settings->get_default_theme();
-		$custom_theme  = array_merge_recursive( $default_theme, $custom_theme );
+		$custom_theme  = array_replace_recursive( $default_theme, $custom_theme );
 		$custom_theme  = $this->flatten_array( $custom_theme );
 		$options       = [];
 		$custom_theme  = array_merge(
@@ -609,12 +619,12 @@ class General extends PluginSettingsBase {
 	public function section_callback( array $arguments ) {
 		switch ( $arguments['id'] ) {
 			case self::SECTION_KEYS:
+				$this->print_header();
+
 				?>
-				<h2>
-					<?php echo esc_html( $this->page_title() ); ?>
-				</h2>
 				<div id="hcaptcha-message"></div>
 				<?php
+
 				$this->notifications->show();
 				$this->print_section_header( $arguments['id'], __( 'Keys', 'hcaptcha-for-forms-and-more' ) );
 				break;
@@ -700,7 +710,7 @@ class General extends PluginSettingsBase {
 	public function admin_enqueue_scripts() {
 		wp_enqueue_script(
 			self::DIALOG_HANDLE,
-			constant( 'HCAPTCHA_URL' ) . "/assets/js/kagg-dialog$this->min_prefix.js",
+			constant( 'HCAPTCHA_URL' ) . "/assets/js/kagg-dialog$this->min_suffix.js",
 			[],
 			constant( 'HCAPTCHA_VERSION' ),
 			true
@@ -708,14 +718,14 @@ class General extends PluginSettingsBase {
 
 		wp_enqueue_style(
 			self::DIALOG_HANDLE,
-			constant( 'HCAPTCHA_URL' ) . "/assets/css/kagg-dialog$this->min_prefix.css",
+			constant( 'HCAPTCHA_URL' ) . "/assets/css/kagg-dialog$this->min_suffix.css",
 			[],
 			constant( 'HCAPTCHA_VERSION' )
 		);
 
 		wp_enqueue_script(
 			self::HANDLE,
-			constant( 'HCAPTCHA_URL' ) . "/assets/js/general$this->min_prefix.js",
+			constant( 'HCAPTCHA_URL' ) . "/assets/js/general$this->min_suffix.js",
 			[ 'jquery', self::DIALOG_HANDLE ],
 			constant( 'HCAPTCHA_VERSION' ),
 			true
@@ -752,7 +762,7 @@ class General extends PluginSettingsBase {
 
 		wp_enqueue_style(
 			self::HANDLE,
-			constant( 'HCAPTCHA_URL' ) . "/assets/css/general$this->min_prefix.css",
+			constant( 'HCAPTCHA_URL' ) . "/assets/css/general$this->min_suffix.css",
 			[ static::PREFIX . '-' . SettingsBase::HANDLE, self::DIALOG_HANDLE ],
 			constant( 'HCAPTCHA_VERSION' )
 		);
@@ -949,8 +959,7 @@ class General extends PluginSettingsBase {
 	 * @return array
 	 */
 	private function flatten_array( array $arr ): array {
-		static $level  = [];
-		static $result = [];
+		static $level = [], $result = [];
 
 		foreach ( $arr as $key => $value ) {
 			$level[] = $key;

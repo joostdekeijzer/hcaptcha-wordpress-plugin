@@ -42,13 +42,6 @@ class FormsPage extends ListPageBase {
 	protected $served;
 
 	/**
-	 * The page is allowed to be shown.
-	 *
-	 * @var bool
-	 */
-	protected $allowed = false;
-
-	/**
 	 * Get page title.
 	 *
 	 * @return string
@@ -82,6 +75,7 @@ class FormsPage extends ListPageBase {
 		parent::init_hooks();
 
 		add_action( 'admin_init', [ $this, 'admin_init' ] );
+		add_action( 'kagg_settings_header', [ $this, 'date_picker_display' ] );
 	}
 
 	/**
@@ -96,7 +90,7 @@ class FormsPage extends ListPageBase {
 			return;
 		}
 
-		$this->list_table = new FormsTable();
+		$this->list_table = new FormsTable( (string) get_plugin_page_hook( $this->option_page(), $this->parent_slug ) );
 
 		$this->prepare_chart_data();
 	}
@@ -107,7 +101,7 @@ class FormsPage extends ListPageBase {
 	public function admin_enqueue_scripts() {
 		wp_enqueue_style(
 			self::HANDLE,
-			constant( 'HCAPTCHA_URL' ) . "/assets/css/forms$this->min_prefix.css",
+			constant( 'HCAPTCHA_URL' ) . "/assets/css/forms$this->min_suffix.css",
 			[ static::PREFIX . '-' . SettingsBase::HANDLE ],
 			constant( 'HCAPTCHA_VERSION' )
 		);
@@ -116,25 +110,11 @@ class FormsPage extends ListPageBase {
 			return;
 		}
 
-		wp_enqueue_script(
-			'chart',
-			constant( 'HCAPTCHA_URL' ) . '/assets/lib/chart.umd.min.js',
-			[],
-			'v4.4.2',
-			true
-		);
-
-		wp_enqueue_script(
-			'chart-adapter-date-fns',
-			constant( 'HCAPTCHA_URL' ) . '/assets/lib/chartjs-adapter-date-fns.bundle.min.js',
-			[ 'chart' ],
-			'v3.0.0',
-			true
-		);
+		parent::admin_enqueue_scripts();
 
 		wp_enqueue_script(
 			self::HANDLE,
-			constant( 'HCAPTCHA_URL' ) . "/assets/js/forms$this->min_prefix.js",
+			constant( 'HCAPTCHA_URL' ) . "/assets/js/forms$this->min_suffix.js",
 			[ 'chart', 'chart-adapter-date-fns' ],
 			constant( 'HCAPTCHA_VERSION' ),
 			true
@@ -146,6 +126,7 @@ class FormsPage extends ListPageBase {
 			[
 				'served'      => $this->served,
 				'servedLabel' => __( 'Served', 'hcaptcha-for-forms-and-more' ),
+				'unit'        => $this->unit,
 			]
 		);
 	}
@@ -158,11 +139,7 @@ class FormsPage extends ListPageBase {
 	 * @noinspection HtmlUnknownTarget
 	 */
 	public function section_callback( array $arguments ) {
-		?>
-		<h2>
-			<?php echo esc_html( $this->page_title() ); ?>
-		</h2>
-		<?php
+		$this->print_header();
 
 		if ( ! $this->allowed ) {
 			$statistics_url = admin_url( 'options-general.php?page=hcaptcha&tab=general#statistics_1' );

@@ -7,6 +7,7 @@
 
 namespace HCaptcha\Admin\Events;
 
+use HCaptcha\Settings\ListPageBase;
 use WP_List_Table;
 
 // If this file is called directly, abort.
@@ -29,14 +30,16 @@ if ( ! class_exists( 'WP_List_Table', false ) ) {
 class FormsTable extends WP_List_Table {
 
 	/**
-	 * Page hook.
-	 */
-	const PAGE_HOOK = 'settings_page_hcaptcha';
-
-	/**
 	 * Forms per page option.
 	 */
 	const FORMS_PER_PAGE = 'hcaptcha_forms_per_page';
+
+	/**
+	 * Plugin page hook.
+	 *
+	 * @var string
+	 */
+	private $plugin_page_hook;
 
 	/**
 	 * Default number of forms to show per page.
@@ -68,15 +71,19 @@ class FormsTable extends WP_List_Table {
 
 	/**
 	 * Class constructor.
+	 *
+	 * @param string $plugin_page_hook Plugin page hook.
 	 */
-	public function __construct() {
+	public function __construct( string $plugin_page_hook ) {
 		parent::__construct(
 			[
 				'singular' => 'form',
 				'plural'   => 'forms',
-				'screen'   => 'forms',
+				'screen'   => $plugin_page_hook,
 			]
 		);
+
+		$this->plugin_page_hook = $plugin_page_hook;
 
 		$this->init();
 	}
@@ -88,14 +95,14 @@ class FormsTable extends WP_List_Table {
 	 */
 	public function init() {
 		$this->columns = [
-			'source'  => __( 'Source', 'hcaptcha-for-forms-and-more' ),
+			'name'    => __( 'Source', 'hcaptcha-for-forms-and-more' ),
 			'form_id' => __( 'Form Id', 'hcaptcha-for-forms-and-more' ),
 			'served'  => __( 'Served', 'hcaptcha-for-forms-and-more' ),
 		];
 
 		$this->plugins = get_plugins();
 
-		add_action( 'load-' . self::PAGE_HOOK, [ $this, 'add_screen_option' ] );
+		add_action( 'load-' . $this->plugin_page_hook, [ $this, 'add_screen_option' ] );
 		add_filter( 'set_screen_option_' . self::FORMS_PER_PAGE, [ $this, 'set_screen_option' ], 10, 3 );
 
 		set_screen_options();
@@ -147,9 +154,24 @@ class FormsTable extends WP_List_Table {
 	 */
 	public function get_sortable_columns(): array {
 		return [
-			'source'  => [ 'source', false, __( 'Source', 'hcaptcha-for-forms-and-more' ), __( 'Table ordered by Source.' ) ],
-			'form_id' => [ 'form_id', false, __( 'Form Id', 'hcaptcha-for-forms-and-more' ), __( 'Table ordered by Form Id.' ) ],
-			'served'  => [ 'served', false, __( 'Served', 'hcaptcha-for-forms-and-more' ), __( 'Table ordered by Served Count.' ) ],
+			'name'    => [
+				'name',
+				false,
+				__( 'Source', 'hcaptcha-for-forms-and-more' ),
+				__( 'Table ordered by Source.' ),
+			],
+			'form_id' => [
+				'form_id',
+				false,
+				__( 'Form Id', 'hcaptcha-for-forms-and-more' ),
+				__( 'Table ordered by Form Id.' ),
+			],
+			'served'  => [
+				'served',
+				false,
+				__( 'Served', 'hcaptcha-for-forms-and-more' ),
+				__( 'Table ordered by Served Count.' ),
+			],
 		];
 	}
 
@@ -157,7 +179,7 @@ class FormsTable extends WP_List_Table {
 	 * Fetch and set up the final data for the table.
 	 */
 	public function prepare_items() {
-		$hidden                = [];
+		$hidden                = get_hidden_columns( $this->screen );
 		$sortable              = $this->get_sortable_columns();
 		$this->_column_headers = [ $this->columns, $hidden, $sortable ];
 
@@ -165,8 +187,13 @@ class FormsTable extends WP_List_Table {
 		$paged   = isset( $_GET['paged'] ) ? absint( wp_unslash( $_GET['paged'] ) ) : 1;
 		$order   = isset( $_GET['order'] ) ? sanitize_key( $_GET['order'] ) : 'ASC';
 		$orderby = isset( $_GET['orderby'] ) ? sanitize_key( $_GET['orderby'] ) : 'source';
+		$date    = isset( $_GET['date'] )
+			? filter_input( INPUT_GET, 'date', FILTER_SANITIZE_FULL_SPECIAL_CHARS )
+			: ''; // We need filter_input here to keep delimiter intact.
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
+		$dates    = explode( ListPageBase::TIMESPAN_DELIMITER, $date );
+		$dates    = array_filter( array_map( 'trim', $dates ) );
 		$per_page = $this->get_items_per_page( self::FORMS_PER_PAGE, $this->per_page_default );
 		$offset   = ( $paged - 1 ) * $per_page;
 		$args     = [
@@ -174,6 +201,7 @@ class FormsTable extends WP_List_Table {
 			'limit'   => $per_page,
 			'order'   => $order,
 			'orderby' => $orderby,
+			'dates'   => $dates,
 		];
 
 		$forms        = Events::get_forms( $args );
@@ -192,12 +220,16 @@ class FormsTable extends WP_List_Table {
 
 	/**
 	 * Column Source.
+	 * Has 'name' slug not to be hidden.
+	 * WP has no filter for special columns.
+	 *
+	 * @see          \WP_Screen::render_list_table_columns_preferences.
 	 *
 	 * @param object $item Item.
 	 *
 	 * @noinspection PhpUnused PhpUnused.
 	 */
-	protected function column_source( $item ): string {
+	protected function column_name( $item ): string {
 		$source = (array) json_decode( $item->source, true );
 
 		foreach ( $source as &$slug ) {

@@ -10,6 +10,7 @@ namespace HCaptcha\Tests\Unit\Settings;
 use HCaptcha\Admin\Events\FormsTable;
 use HCaptcha\Main;
 use HCaptcha\Settings\FormsPage;
+use HCaptcha\Settings\ListPageBase;
 use HCaptcha\Settings\PluginSettingsBase;
 use HCaptcha\Settings\Settings;
 use HCaptcha\Tests\Unit\HCaptchaTestCase;
@@ -63,15 +64,15 @@ class FormsPageTest extends HCaptchaTestCase {
 	 * @return void
 	 */
 	public function test_init_hooks() {
-		$plugin_base_name = 'hcaptcha-wordpress-plugin/hcaptcha.php';
-
 		$subject = Mockery::mock( FormsPage::class )->makePartial();
 		$subject->shouldAllowMockingProtectedMethods();
-		$subject->shouldReceive( 'plugin_basename' )->andReturn( $plugin_base_name );
+		$subject->shouldReceive( 'is_tab_active' )->with( $subject )->andReturn( false );
 
 		WP_Mock::expectActionAdded( 'admin_init', [ $subject, 'admin_init' ] );
 
-		$subject->init_hooks();
+		$method = 'init_hooks';
+
+		$subject->$method();
 	}
 
 	/**
@@ -81,9 +82,13 @@ class FormsPageTest extends HCaptchaTestCase {
 	 *
 	 * @return void
 	 * @dataProvider dp_test_admin_init
+	 * @throws ReflectionException ReflectionException.
 	 */
 	public function test_admin_init( bool $statistics ) {
-		$times = $statistics ? 1 : 0;
+		$times       = $statistics ? 1 : 0;
+		$option_page = 'hcaptcha-forms';
+		$parent_slug = '';
+		$page_hook   = 'hcaptcha_page_' . $parent_slug . $option_page;
 
 		new WP_List_Table();
 
@@ -94,10 +99,14 @@ class FormsPageTest extends HCaptchaTestCase {
 		$settings->shouldReceive( 'is_on' )->with( 'statistics' )->andReturn( $statistics );
 		$main->shouldReceive( 'settings' )->andReturn( $settings );
 		$subject->shouldAllowMockingProtectedMethods();
+		$subject->shouldReceive( 'option_page' )->times( $times )->andReturn( $option_page );
 		$subject->shouldReceive( 'prepare_chart_data' )->times( $times );
+
+		$this->set_protected_property( $subject, 'parent_slug', $parent_slug );
 
 		WP_Mock::userFunction( 'hcaptcha' )->with()->andReturn( $main );
 		WP_Mock::userFunction( 'get_plugins' )->with()->andReturn( [] );
+		WP_Mock::userFunction( 'get_plugin_page_hook' )->with( $option_page, $parent_slug )->andReturn( $page_hook );
 
 		WP_Mock::userFunction( 'set_screen_options' )->with()->times( $times );
 
@@ -127,15 +136,18 @@ class FormsPageTest extends HCaptchaTestCase {
 	public function test_admin_enqueue_scripts( bool $allowed ) {
 		$plugin_url     = 'http://test.test/wp-content/plugins/hcaptcha-wordpress-plugin';
 		$plugin_version = '1.0.0';
-		$min_prefix     = '.min';
+		$min_suffix     = '.min';
 		$served         = [ 'some served events' ];
+		$unit           = 'hour';
+		$language_code  = 'en';
 		$times          = $allowed ? 1 : 0;
 
 		$subject = Mockery::mock( FormsPage::class )->makePartial();
 		$subject->shouldAllowMockingProtectedMethods();
-		$this->set_protected_property( $subject, 'min_prefix', $min_prefix );
+		$this->set_protected_property( $subject, 'min_suffix', $min_suffix );
 		$this->set_protected_property( $subject, 'allowed', $allowed );
 		$this->set_protected_property( $subject, 'served', $served );
+		$this->set_protected_property( $subject, 'unit', $unit );
 
 		FunctionMocker::replace(
 			'constant',
@@ -155,7 +167,7 @@ class FormsPageTest extends HCaptchaTestCase {
 		WP_Mock::userFunction( 'wp_enqueue_style' )
 			->with(
 				FormsPage::HANDLE,
-				$plugin_url . "/assets/css/forms$min_prefix.css",
+				$plugin_url . "/assets/css/forms$min_suffix.css",
 				[ PluginSettingsBase::PREFIX . '-' . SettingsBase::HANDLE ],
 				$plugin_version
 			)
@@ -163,8 +175,8 @@ class FormsPageTest extends HCaptchaTestCase {
 
 		WP_Mock::userFunction( 'wp_enqueue_script' )
 			->with(
-				'chart',
-				$plugin_url . '/assets/lib/chart.umd.min.js',
+				ListPageBase::CHART_HANDLE,
+				$plugin_url . '/assets/lib/chartjs/chart.umd.min.js',
 				[],
 				'v4.4.2',
 				true
@@ -174,17 +186,66 @@ class FormsPageTest extends HCaptchaTestCase {
 		WP_Mock::userFunction( 'wp_enqueue_script' )
 			->with(
 				'chart-adapter-date-fns',
-				$plugin_url . '/assets/lib/chartjs-adapter-date-fns.bundle.min.js',
-				[ 'chart' ],
+				$plugin_url . '/assets/lib/chartjs/chartjs-adapter-date-fns.bundle.min.js',
+				[ ListPageBase::CHART_HANDLE ],
 				'v3.0.0',
 				true
+			)
+			->times( $times );
+
+		WP_Mock::userFunction( 'wp_enqueue_style' )
+			->with(
+				ListPageBase::FLATPICKR_HANDLE,
+				$plugin_url . '/assets/lib/flatpickr/flatpickr.min.css',
+				[],
+				'4.6.13'
+			)
+			->times( $times );
+
+		WP_Mock::userFunction( 'wp_enqueue_script' )
+			->with(
+				ListPageBase::FLATPICKR_HANDLE,
+				$plugin_url . '/assets/lib/flatpickr/flatpickr.min.js',
+				[],
+				'4.6.13',
+				true
+			)
+			->times( $times );
+
+		WP_Mock::userFunction( 'wp_enqueue_style' )
+			->with(
+				ListPageBase::HANDLE,
+				$plugin_url . "/assets/css/settings-list-page-base$min_suffix.css",
+				[ ListPageBase::FLATPICKR_HANDLE ],
+				$plugin_version
+			)
+			->times( $times );
+
+		WP_Mock::userFunction( 'wp_enqueue_script' )
+			->with(
+				ListPageBase::HANDLE,
+				$plugin_url . "/assets/js/settings-list-page-base$min_suffix.js",
+				[ ListPageBase::FLATPICKR_HANDLE ],
+				$plugin_version,
+				true
+			)
+			->times( $times );
+
+		WP_Mock::userFunction( 'wp_localize_script' )
+			->with(
+				ListPageBase::HANDLE,
+				ListPageBase::OBJECT,
+				[
+					'delimiter' => ListPageBase::TIMESPAN_DELIMITER,
+					'locale'    => $language_code,
+				]
 			)
 			->times( $times );
 
 		WP_Mock::userFunction( 'wp_enqueue_script' )
 			->with(
 				FormsPage::HANDLE,
-				$plugin_url . "/assets/js/forms$min_prefix.js",
+				$plugin_url . "/assets/js/forms$min_suffix.js",
 				[ 'chart', 'chart-adapter-date-fns' ],
 				$plugin_version,
 				true
@@ -198,9 +259,12 @@ class FormsPageTest extends HCaptchaTestCase {
 				[
 					'served'      => $served,
 					'servedLabel' => __( 'Served', 'hcaptcha-for-forms-and-more' ),
+					'unit'        => $unit,
 				]
 			)
 			->times( $times );
+
+		WP_Mock::userFunction( 'get_user_locale' )->andReturn( $language_code );
 
 		$subject->admin_enqueue_scripts();
 	}
@@ -223,8 +287,13 @@ class FormsPageTest extends HCaptchaTestCase {
 	 * @throws ReflectionException ReflectionException.
 	 */
 	public function test_section_callback() {
-		$expected = '		<h2>
-			Forms		</h2>
+		$datepicker = '<div class="hcaptcha-filter"></div>';
+		$expected   = '		<div class="hcaptcha-header-bar">
+			<div class="hcaptcha-header">
+				<h2>
+					Forms				</h2>
+			</div>
+			' . $datepicker . '		</div>
 				<div id="hcaptcha-forms-chart">
 			<canvas id="formsChart" aria-label="The hCaptcha Forms Chart" role="img">
 				<p>
@@ -236,7 +305,17 @@ class FormsPageTest extends HCaptchaTestCase {
 		';
 
 		$list_table = Mockery::mock( FormsTable::class )->makePartial();
-		$subject    = Mockery::mock( FormsPage::class )->makePartial()->shouldAllowMockingProtectedMethods();
+		$subject    = Mockery::mock( FormsPage::class )->makePartial();
+
+		$subject->shouldAllowMockingProtectedMethods();
+		$subject->shouldReceive( 'date_picker_display' )->andReturnUsing(
+			static function () use ( $datepicker ) {
+				// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+				echo $datepicker;
+			}
+		);
+
+		WP_Mock::onAction( 'kagg_settings_header' )->with( null )->perform( [ $subject, 'date_picker_display' ] );
 
 		$list_table->shouldReceive( 'display' )->once();
 		$this->set_protected_property( $subject, 'allowed', true );
@@ -253,8 +332,12 @@ class FormsPageTest extends HCaptchaTestCase {
 	 * @noinspection HtmlUnknownTarget
 	 */
 	public function test_section_callback_when_not_allowed() {
-		$expected = '		<h2>
-			Forms		</h2>
+		$expected = '		<div class="hcaptcha-header-bar">
+			<div class="hcaptcha-header">
+				<h2>
+					Forms				</h2>
+			</div>
+					</div>
 					<div class="hcaptcha-forms-sample-bg"></div>
 
 			<div class="hcaptcha-forms-sample-text">
