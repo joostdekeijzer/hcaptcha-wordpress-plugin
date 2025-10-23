@@ -12,6 +12,11 @@
   },
   "steps": [
     {
+      "step": "login",
+      "username": "admin",
+      "password": "password"
+    },
+    {
       "step": "installPlugin",
       "pluginData": {
         "resource": "wordpress.org/plugins",
