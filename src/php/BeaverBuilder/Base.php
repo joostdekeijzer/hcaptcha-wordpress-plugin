@@ -44,8 +44,8 @@ abstract class Base extends LoginBase {
 	 * @noinspection PhpUnusedParameterInspection
 	 */
 	protected function add_hcap_form( string $out, $module ): string {
-		$form_id = false !== strpos( static::ACTION, 'login' ) ? 'login' : 'contact';
-		$args    = [
+		$form_id        = false !== strpos( static::ACTION, 'login' ) ? 'login' : 'contact';
+		$args           = [
 			'action' => static::ACTION,
 			'name'   => static::NONCE,
 			'id'     => [
@@ -53,12 +53,7 @@ abstract class Base extends LoginBase {
 				'form_id' => $form_id,
 			],
 		];
-
-		$hcaptcha =
-			'<div class="fl-input-group fl-hcaptcha">' .
-			HCaptcha::form( $args ) .
-			'</div>';
-
+		$hcaptcha       = '<div class="fl-input-group fl-hcaptcha">' . HCaptcha::form( $args ) . '</div>';
 		$button_pattern = '<div class="fl-button-wrap';
 
 		return str_replace( $button_pattern, $hcaptcha . $button_pattern, $out );
@@ -98,18 +93,10 @@ abstract class Base extends LoginBase {
 	public function add_type_module( $tag, string $handle, string $src ): string {
 		$tag = (string) $tag;
 
-		if ( self::HANDLE !== $handle ) {
+		if ( static::HANDLE !== $handle ) {
 			return $tag;
 		}
 
-		$type = ' type="module"';
-
-		if ( false !== strpos( $tag, $type ) ) {
-			return $tag;
-		}
-
-		$search = ' src';
-
-		return str_replace( $search, $type . $search, $tag );
+		return HCaptcha::add_type_module( $tag );
 	}
 }

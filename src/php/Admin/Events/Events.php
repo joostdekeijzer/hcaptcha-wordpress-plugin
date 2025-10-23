@@ -7,6 +7,7 @@
 
 namespace HCaptcha\Admin\Events;
 
+use Exception;
 use HCaptcha\Helpers\HCaptcha;
 use HCaptcha\Settings\General;
 
@@ -19,6 +20,24 @@ class Events {
 	 * Table name.
 	 */
 	public const TABLE_NAME = 'hcaptcha_events';
+
+	/**
+	 * Served items limit.
+	 */
+	public const SERVED_LIMIT = 1000;
+
+	/**
+	 * Verify request hook priority.
+	 * Must be higher than \HCaptcha\AntiSpam\AntiSpam::VERIFY_REQUEST_PRIORITY
+	 */
+	public const VERIFY_REQUEST_PRIORITY = -1000;
+
+	/**
+	 * Saved flag.
+	 *
+	 * @var bool
+	 */
+	private $saved;
 
 	/**
 	 * Class constructor.
@@ -39,19 +58,29 @@ class Events {
 			return;
 		}
 
-		add_filter( 'hcap_verify_request', [ $this, 'save_event' ], -PHP_INT_MAX, 2 );
+		add_filter( 'hcap_verify_request', [ $this, 'save_event' ], self::VERIFY_REQUEST_PRIORITY, 3 );
 	}
 
 	/**
 	 * Save event.
 	 *
-	 * @param string|null|mixed $result      The hCaptcha verification result.
-	 * @param array             $error_codes Error codes.
+	 * @since 4.15.0 The `$error_codes` parameter was deprecated.
+	 *
+	 * @param string|null|mixed $result     The result of verification. The null means success.
+	 * @param string[]          $deprecated Error code(s). Empty array on success.
+	 * @param object            $error_info Error info. Contains error codes or empty array on success.
 	 *
 	 * @return string|null|mixed
+	 * @noinspection PhpUnusedParameterInspection
 	 */
-	public function save_event( $result, array $error_codes ) {
+	public function save_event( $result, array $deprecated, object $error_info ) {
 		global $wpdb;
+
+		if ( $this->saved ) {
+			return $result;
+		}
+
+		$this->saved = true;
 
 		if ( ! ( is_string( $result ) || is_null( $result ) ) ) {
 			return $result;
@@ -65,10 +94,18 @@ class Events {
 		if ( $settings->is_on( 'collect_ua' ) ) {
 			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
 			$user_agent = isset( $_SERVER['HTTP_USER_AGENT'] ) ? wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) : '';
+
+			if ( $settings->is_on( 'anonymous' ) ) {
+				$user_agent = wp_hash( $user_agent );
+			}
 		}
 
 		if ( $settings->is_on( 'collect_ip' ) ) {
 			$ip = (string) hcap_get_user_ip();
+
+			if ( $settings->is_on( 'anonymous' ) ) {
+				$ip = wp_hash( $ip );
+			}
 		}
 
 		$info = HCaptcha::decode_id_info();
@@ -90,7 +127,7 @@ class Events {
 				'ip'          => $ip,
 				'user_agent'  => $user_agent,
 				'uuid'        => $uuid,
-				'error_codes' => (string) wp_json_encode( $error_codes ),
+				'error_codes' => (string) wp_json_encode( $error_info->codes ?? [] ),
 				'date_gmt'    => (string) gmdate( 'Y-m-d H:i:s' ),
 			]
 		);
@@ -108,47 +145,56 @@ class Events {
 	public static function get_events( array $args = [] ): array {
 		global $wpdb;
 
-		$args          = wp_parse_args(
-			$args,
-			[
-				'columns' => [],
-				'offset'  => 0,
-				'limit'   => 20,
-				'order'   => 'ASC',
-				'orderby' => '',
-				'dates'   => [],
-			]
-		);
-		$args['dates'] = $args['dates'] ?: self::get_default_dates();
+		$args = self::prepare_args( $args );
 
-		$columns    = implode( ',', $args['columns'] );
-		$columns    = $columns ?: '*';
-		$table_name = $wpdb->prefix . self::TABLE_NAME;
-		$where_date = self::get_where_date_gmt( $args );
-		$orderby    = self::get_order_by( $args );
-		$offset     = absint( $args['offset'] );
-		$limit      = absint( $args['limit'] );
+		$columns           = implode( ',', $args['columns'] );
+		$columns           = $columns ?: '*';
+		$table_name        = $wpdb->prefix . self::TABLE_NAME;
+		$where_date        = self::get_where_date_gmt( $args );
+		$where_date_nested = self::get_where_date_gmt_nested( $args );
+		$orderby           = self::get_order_by( $args );
+		$limit             = $args['limit'];
 
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-		$results = (array) $wpdb->get_results(
+		$queries = [
+			'START TRANSACTION',
+			"SELECT COUNT(*)
+				FROM $table_name
+				WHERE $where_date",
 			$wpdb->prepare(
-			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				"SELECT
-						SQL_CALC_FOUND_ROWS
-    					$columns
+				"SELECT $columns
 						FROM $table_name
-						WHERE $where_date
+						WHERE $where_date_nested
 						$orderby
-						LIMIT %d, %d",
-				$offset,
+						LIMIT %d",
 				$limit
 			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			)
-		);
+			),
+			'COMMIT',
+		];
 
-		$total = (int) $wpdb->get_var( 'SELECT FOUND_ROWS()' );
+		$query_results = [];
 
+		foreach ( $queries as $query ) {
+			$result          = $wpdb->query( $query );
+			$query_results[] = $wpdb->last_result;
+
+			if ( false === $result ) {
+				$wpdb->query( 'ROLLBACK' );
+				break;
+			}
+		}
+		// phpcs:enable WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+
+		if ( false !== $result ) {
+			$results = (array) $query_results[2];
+			$total   = (int) $query_results[1][0]->{'COUNT(*)'};
+		} else {
+			$results = [];
+			$total   = 0;
+		}
 
 		return [
 			'items' => $results,
@@ -166,31 +212,20 @@ class Events {
 	public static function get_forms( array $args = [] ): array {
 		global $wpdb;
 
-		$args          = wp_parse_args(
-			$args,
-			[
-				'offset'  => 0,
-				'limit'   => 20,
-				'order'   => 'ASC',
-				'orderby' => '',
-				'dates'   => [],
-			]
-		);
-		$args['dates'] = $args['dates'] ?: self::get_default_dates();
+		$args = self::prepare_args( $args );
 
 		$table_name = $wpdb->prefix . self::TABLE_NAME;
 		$where_date = self::get_where_date_gmt( $args );
 		$orderby    = self::get_order_by( $args );
-		$offset     = absint( $args['offset'] );
-		$limit      = absint( $args['limit'] );
+		$offset     = $args['offset'];
+		$limit      = $args['limit'];
 
+		// We need to collect id also to distinguish rows on the Forms page.
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$results = (array) $wpdb->get_results(
 			$wpdb->prepare(
 			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				"SELECT
-						SQL_CALC_FOUND_ROWS
-    					source, form_id, COUNT(*) as served
+				"SELECT SQL_CALC_FOUND_ROWS id, source, form_id, COUNT(*) as served
 						FROM $table_name
 						WHERE $where_date
 						GROUP BY source, form_id
@@ -214,12 +249,17 @@ class Events {
 			$where .= " OR (source='$source' AND form_id='$form_id')";
 		}
 
-		$where = "($where) AND " . $where_date;
+		$where        = "($where) AND " . $where_date;
+		$served_limit = self::SERVED_LIMIT;
 
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$served = (array) $wpdb->get_results(
 		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			"SELECT date_gmt FROM $table_name WHERE $where"
+			"SELECT date_gmt
+					FROM $table_name FORCE INDEX (date_gmt)
+					WHERE $where
+					ORDER BY date_gmt
+					LIMIT $served_limit"
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		);
 
@@ -233,7 +273,7 @@ class Events {
 	}
 
 	/**
-	 * Create table.
+	 * Create the table.
 	 *
 	 * @return void
 	 */
@@ -283,42 +323,97 @@ class Events {
 	public static function get_where_date_gmt( array $args ): string {
 		$dates = $args['dates'];
 
-		if ( $dates ) {
-			$dates[1] = $dates[1] ?? $dates[0];
-
-			$dates[0] .= ' 00:00:00';
-			$dates[1] .= ' 23:59:59';
-
-			foreach ( $dates as &$date ) {
-				$date = wp_date( 'Y-m-d H:i:s', strtotime( $date ) );
-			}
-
-			unset( $date );
-
-			$where_date = sprintf(
-				"date_gmt BETWEEN '%s' AND '%s'",
-				esc_sql( $dates[0] ),
-				esc_sql( $dates[1] )
-			);
-		} else {
-			$where_date = '1=1';
+		if ( ! $dates ) {
+			return '1=1';
 		}
 
-		return $where_date;
+		$dates = self::prepare_gmt_dates( $dates );
+
+		return sprintf(
+			"date_gmt BETWEEN '%s' AND '%s'",
+			esc_sql( $dates[0] ),
+			esc_sql( $dates[1] )
+		);
 	}
 
 	/**
-	 * Get ODER BY / ORDER clause
+	 * Get where date GMT with a nested request to optimize.
+	 *
+	 * @param array $args Arguments.
+	 *
+	 * @return string
+	 */
+	public static function get_where_date_gmt_nested( array $args ): string {
+		global $wpdb;
+
+		$dates = $args['dates'];
+
+		if ( ! $dates ) {
+			return '1=1';
+		}
+
+		$dates      = self::prepare_gmt_dates( $dates );
+		$table_name = $wpdb->prefix . self::TABLE_NAME;
+		$order      = $args['order'];
+		$offset     = $args['offset'];
+		$compare    = 'DESC' === $order ? '<=' : '>=';
+
+		return sprintf(
+			"date_gmt BETWEEN '%s' AND '%s'
+					AND date_gmt %s (
+						SELECT date_gmt
+						FROM %s
+						WHERE date_gmt BETWEEN '%s' AND '%s'
+						ORDER BY date_gmt %s
+						LIMIT %d, 1
+					)
+					",
+			esc_sql( $dates[0] ),
+			esc_sql( $dates[1] ),
+			$compare,
+			$table_name,
+			esc_sql( $dates[0] ),
+			esc_sql( $dates[1] ),
+			$order,
+			$offset
+		);
+	}
+
+	/**
+	 * Prepare dates.
+	 *
+	 * @param array $dates Dates.
+	 *
+	 * @return array
+	 */
+	public static function prepare_gmt_dates( array $dates ): array {
+		$dates[1] = $dates[1] ?? $dates[0];
+
+		$dates[0] .= ' 00:00:00';
+		$dates[1] .= ' 23:59:59';
+
+		foreach ( $dates as &$date ) {
+			$date = get_gmt_from_date( $date );
+		}
+
+		unset( $date );
+
+		return $dates;
+	}
+
+	/**
+	 * Get ORDER BY / ORDER clause
 	 *
 	 * @param array $args Arguments.
 	 *
 	 * @return string
 	 */
 	private static function get_order_by( array $args ): string {
-		$order = strtoupper( $args['order'] );
-		$order = 'ASC' === $order ? '' : $order;
+		$orderby = $args['orderby'];
+		$order   = $args['order'];
+		$order   = 'ASC' === $order ? '' : $order;
 
-		return $args['orderby'] ? 'ORDER BY ' . $args['orderby'] . ' ' . $order : '';
+		return $orderby ? 'ORDER BY ' . $orderby . ' ' . $order : '';
 	}
 
 	/**
@@ -326,10 +421,16 @@ class Events {
 	 *
 	 * @return array
 	 */
-	private static function get_default_dates(): array {
+	public static function get_default_dates(): array {
 		$end_date   = date_create_immutable( 'now', wp_timezone() );
 		$start_date = $end_date;
-		$start_date = $start_date->modify( '-30 day' );
+
+		try {
+			$start_date = $start_date->modify( '-30 day' );
+		} catch ( Exception $e ) {
+			$start_date = $end_date;
+		}
+
 		$start_date = $start_date->setTime( 0, 0 );
 		$end_date   = $end_date->setTime( 23, 59, 59 );
 		$format     = 'Y-m-d';
@@ -391,5 +492,38 @@ class Events {
 		);
 
 		return preg_match( '/^' . $regex . '$/is', $subject );
+	}
+
+	/**
+	 * Prepare arguments.
+	 *
+	 * @param array $args Arguments.
+	 *
+	 * @return array
+	 */
+	private static function prepare_args( array $args ): array {
+		$args = wp_parse_args(
+			$args,
+			[
+				'columns' => [],
+				'offset'  => 0,
+				'limit'   => 20,
+				'order'   => 'ASC',
+				'orderby' => '',
+				'dates'   => [],
+			]
+		);
+
+		$args['columns'] = array_map( 'strtolower', $args['columns'] );
+		$args['offset']  = absint( $args['offset'] );
+		$args['limit']   = max( 1, absint( $args['limit'] ) );
+		$order           = strtoupper( $args['order'] );
+		$args['order']   = in_array( $order, [ 'ASC', 'DESC' ], true ) ? $order : 'ASC';
+		$orderby         = strtolower( $args['orderby'] );
+		$args['orderby'] = in_array( $orderby, $args['columns'], true ) ? $orderby : '';
+		$dates           = (array) $args['dates'];
+		$args['dates']   = $dates ?: self::get_default_dates();
+
+		return $args;
 	}
 }

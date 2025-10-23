@@ -14,7 +14,7 @@ use HCaptcha\Main;
  * Class NF
  * Support Ninja Forms.
  */
-class NF {
+class NF implements Base {
 
 	/**
 	 * Dialog scripts and style handle.
@@ -41,14 +41,14 @@ class NF {
 	 *
 	 * @var int
 	 */
-	private $form_id = 0;
+	protected $form_id = 0;
 
 	/**
 	 * Templates dir.
 	 *
 	 * @var string
 	 */
-	private $templates_dir;
+	protected $templates_dir;
 
 	/**
 	 * NF constructor.
@@ -65,14 +65,17 @@ class NF {
 	 * @return void
 	 */
 	public function init_hooks(): void {
+		$name = Base::NAME;
+
 		add_action( 'toplevel_page_ninja-forms', [ $this, 'admin_template' ], 11 );
 		add_action( 'nf_admin_enqueue_scripts', [ $this, 'nf_admin_enqueue_scripts' ] );
 		add_filter( 'ninja_forms_register_fields', [ $this, 'register_fields' ] );
-		add_action( 'ninja_forms_loaded', [ $this, 'place_hcaptcha_before_recaptcha_field' ] );
 		add_filter( 'ninja_forms_field_template_file_paths', [ $this, 'template_file_paths' ] );
 		add_action( 'nf_get_form_id', [ $this, 'set_form_id' ] );
-		add_filter( 'ninja_forms_localize_field_hcaptcha-for-ninja-forms', [ $this, 'localize_field' ] );
+		add_filter( "ninja_forms_localize_field_$name", [ $this, 'localize_field' ] );
+		add_filter( "ninja_forms_localize_field_{$name}_preview", [ $this, 'localize_field' ] );
 		add_action( 'wp_print_footer_scripts', [ $this, 'nf_captcha_script' ], 9 );
+		add_filter( 'script_loader_tag', [ $this, 'add_type_module' ], 10, 3 );
 	}
 
 	/**
@@ -90,13 +93,13 @@ class NF {
 		$template = file_get_contents( $this->templates_dir . 'fields-hcaptcha.html' );
 
 		// Fix bug in Ninja forms.
-		// For template script id, they expect field->_name in admin, but field->_type on frontend.
+		// For template script id, they expect field->_name in admin, but field->_type on the frontend.
 		// It works for NF fields as all fields have _name === _type.
 
 		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 		echo str_replace(
-			'tmpl-nf-field-hcaptcha',
-			'tmpl-nf-field-hcaptcha-for-ninja-forms',
+			'tmpl-nf-field-' . Base::TYPE,
+			'tmpl-nf-field-' . Base::NAME,
 			$template
 		);
 	}
@@ -110,7 +113,7 @@ class NF {
 		global $wp_scripts;
 
 		// Add hCaptcha to the preloaded form data.
-		$data = $wp_scripts->registered['nf-builder']->extra['data'];
+		$data = $wp_scripts->registered['nf-builder']->extra['data'] ?? '';
 
 		if ( ! preg_match( '/var nfDashInlineVars = (.+);/', $data, $m ) ) {
 			return;
@@ -120,14 +123,16 @@ class NF {
 		$found = false;
 
 		foreach ( $vars['preloadedFormData']['fields'] as & $field ) {
-			if ( 'hcaptcha-for-ninja-forms' === $field['type'] ) {
+			// See comment in admin_template().
+			if ( Base::NAME === $field['type'] ) {
 				$found             = true;
 				$search            = 'class="h-captcha"';
 				$field['hcaptcha'] = str_replace(
 					$search,
 					$search . ' style="z-index: 2;"',
-					$this->get_hcaptcha( (int) $field['id'] )
+					$this->get_hcaptcha( $field['id'] )
 				);
+
 				break;
 			}
 		}
@@ -186,33 +191,12 @@ class NF {
 	public function register_fields( $fields ): array {
 		$fields = (array) $fields;
 
-		$fields['hcaptcha-for-ninja-forms'] = new Field();
+		$index = array_search( 'recaptcha', array_keys( $fields ), true );
+		$index = false === $index ? count( $fields ) : $index;
 
-		return $fields;
-	}
-
-	/**
-	 * Place hCaptcha field before recaptcha field.
-	 *
-	 * @return void
-	 * @noinspection PhpUndefinedFunctionInspection
-	 */
-	public function place_hcaptcha_before_recaptcha_field(): void {
-		$fields = Ninja_Forms()->fields;
-		$index  = array_search( 'recaptcha', array_keys( $fields ), true );
-
-		if ( false === $index ) {
-			return;
-		}
-
-		$hcaptcha_key   = 'hcaptcha-for-ninja-forms';
-		$hcaptcha_value = $fields[ $hcaptcha_key ];
-
-		unset( $fields[ $hcaptcha_key ] );
-
-		Ninja_Forms()->fields = array_merge(
+		return array_merge(
 			array_slice( $fields, 0, $index ),
-			[ $hcaptcha_key => $hcaptcha_value ],
+			[ Base::NAME => new Field() ],
 			array_slice( $fields, $index )
 		);
 	}
@@ -253,7 +237,10 @@ class NF {
 	public function localize_field( $field ): array {
 		$field = (array) $field;
 
-		$field['settings']['hcaptcha'] = $field['settings']['hcaptcha'] ?? $this->get_hcaptcha( (int) $field['id'] );
+		$field['settings']['hcaptcha'] = $field['settings']['hcaptcha'] ?? $this->get_hcaptcha( $field['id'] );
+
+		// Mark hCaptcha as shown in any case. Needed on the preview page.
+		hcaptcha()->form_shown = true;
 
 		return $field;
 	}
@@ -261,11 +248,11 @@ class NF {
 	/**
 	 * Get hCaptcha.
 	 *
-	 * @param int $field_id Field id.
+	 * @param int|string $field_id Field id.
 	 *
 	 * @return string
 	 */
-	private function get_hcaptcha( int $field_id ): string {
+	private function get_hcaptcha( $field_id ): string {
 		$hcaptcha_id = uniqid( 'hcaptcha-nf-', true );
 
 		// Nonce is checked by Ninja forms.
@@ -279,8 +266,8 @@ class NF {
 		$hcaptcha = HCaptcha::form( $args );
 
 		return str_replace(
-			'<div',
-			'<div id="' . $hcaptcha_id . '" data-fieldId="' . $field_id . '"',
+			'<h-captcha',
+			'<h-captcha id="' . $hcaptcha_id . '" data-fieldId="' . $field_id . '"',
 			$hcaptcha
 		);
 	}
@@ -300,5 +287,25 @@ class NF {
 			HCAPTCHA_VERSION,
 			true
 		);
+	}
+
+	/**
+	 * Add type="module" attribute to script tag.
+	 *
+	 * @param string|mixed $tag    Script tag.
+	 * @param string       $handle Script handle.
+	 * @param string       $src    Script source.
+	 *
+	 * @return string
+	 * @noinspection PhpUnusedParameterInspection
+	 */
+	public function add_type_module( $tag, string $handle, string $src ): string {
+		$tag = (string) $tag;
+
+		if ( self::HANDLE !== $handle ) {
+			return $tag;
+		}
+
+		return HCaptcha::add_type_module( $tag );
 	}
 }

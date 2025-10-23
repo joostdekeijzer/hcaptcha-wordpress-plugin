@@ -5,17 +5,23 @@
 /* global hcaptcha, HCaptchaMainObject */
 
 /**
+ * @param form.submitButtonElement
+ */
+
+/**
  * Class hCaptcha.
  */
 class HCaptcha {
 	constructor() {
 		this.foundForms = [];
 		this.params = null;
-		this.observing = false;
+		this.observingDarkMode = false;
+		this.observingPasswordManagers = false;
 		this.darkElement = null;
 		this.darkClass = null;
 		this.callback = this.callback.bind( this );
 		this.validate = this.validate.bind( this );
+		this.addedDCLCallbacks = new Set();
 	}
 
 	/**
@@ -37,37 +43,36 @@ class HCaptcha {
 	 * Get found form by id.
 	 *
 	 * @param {string} id hCaptcha id.
-	 * @return {*} Form id.
+	 *
+	 * @return {Object|null} Form data.
 	 */
 	getFoundFormById( id ) {
 		const forms = this.foundForms.filter( ( form ) => id === form.hCaptchaId );
-		return forms[ 0 ];
+
+		return forms[ 0 ] ?? null;
 	}
 
 	/**
 	 * Get hCaptcha widget id.
 	 *
 	 * @param {HTMLDivElement} el Form element.
+	 *
 	 * @return {string} Widget id.
 	 */
 	getWidgetId( el ) {
-		if ( typeof el === 'undefined' ) {
+		if ( el === undefined ) {
 			return '';
 		}
 
-		const hcaptcha = el.getElementsByClassName( 'h-captcha' )[ 0 ];
+		const id = el.closest( this.formSelector )?.dataset?.hCaptchaId ?? '';
 
-		if ( typeof hcaptcha === 'undefined' ) {
+		if ( ! id ) {
 			return '';
 		}
 
-		const iframe = hcaptcha.getElementsByTagName( 'iframe' )[ 0 ];
+		const form = this.getFoundFormById( id );
 
-		if ( typeof iframe === 'undefined' ) {
-			return '';
-		}
-
-		return iframe.dataset.hcaptchaWidgetId ?? '';
+		return form?.widgetId ?? '';
 	}
 
 	/**
@@ -86,7 +91,7 @@ class HCaptcha {
 	}
 
 	/**
-	 * Check if child is same or a descendant of parent.
+	 * Check if child is same or a descendant of the parent.
 	 *
 	 * @param {HTMLDivElement} parent Parent element.
 	 * @param {HTMLDivElement} child  Child element.
@@ -106,35 +111,66 @@ class HCaptcha {
 	}
 
 	/**
-	 * Validate hCaptcha widget.
+	 * Set the current form.
 	 *
 	 * @param {CustomEvent} event Event.
+	 * @return {Object|undefined} Currently processing form.
 	 */
-	validate( event ) {
-		const formElement = event.currentTarget.closest( this.formSelector );
-		const form = this.getFoundFormById( formElement.dataset.hCaptchaId );
-		const submitButtonElement = form.submitButtonElement;
+	getCurrentForm( event ) {
+		/**
+		 * @type {HTMLElement}
+		 */
+		const currentTarget = event.currentTarget;
 
-		if ( ! this.isSameOrDescendant( submitButtonElement, event.target ) ) {
-			return;
+		/**
+		 * @type {HTMLFormElement} formElement
+		 */
+		const formElement = currentTarget.closest( this.formSelector );
+
+		/**
+		 * @type {{submitButtonElement: HTMLElement, widgetId: string}|null}
+		 */
+		const form = this.getFoundFormById( formElement?.dataset?.hCaptchaId );
+
+		const submitButtonElement = form?.submitButtonElement;
+		const widgetId = form?.widgetId;
+
+		if (
+			! widgetId ||
+			! this.isSameOrDescendant( submitButtonElement, event.target )
+		) {
+			return undefined;
 		}
 
 		event.preventDefault();
 		event.stopPropagation();
 
-		this.currentForm = { formElement, submitButtonElement };
-		const widgetId = this.getWidgetId( formElement );
+		return { formElement, submitButtonElement, widgetId };
+	}
 
-		if ( ! widgetId ) {
+	/**
+	 * Validate hCaptcha widget.
+	 *
+	 * @param {CustomEvent} event Event.
+	 */
+	validate( event ) {
+		this.currentForm = this.getCurrentForm( event );
+
+		if ( ! this.currentForm ) {
 			return;
 		}
 
-		const iframe = formElement.querySelector( '.h-captcha iframe' );
-		const token = iframe.dataset.hcaptchaResponse;
+		const { formElement, widgetId } = this.currentForm;
+
+		/**
+		 * @type {HTMLTextAreaElement}
+		 */
+		const response = formElement.querySelector( this.responseSelector );
+		const token = response ? response.value : '';
 
 		// Do not execute hCaptcha twice.
 		if ( token === '' ) {
-			hcaptcha.execute( widgetId );
+			hcaptcha.execute( widgetId, { async: false } );
 		} else {
 			this.callback( token );
 		}
@@ -166,7 +202,7 @@ class HCaptcha {
 		let params;
 
 		try {
-			params = JSON.parse( HCaptchaMainObject.params );
+			params = JSON.parse( wp.hooks.applyFilters( 'hcaptcha.params', HCaptchaMainObject?.params ?? '' ) );
 		} catch ( e ) {
 			params = {};
 		}
@@ -191,7 +227,7 @@ class HCaptcha {
 	setDarkData() {
 		let darkData = {
 			'twenty-twenty-one': {
-				// Twenty Twenty-One theme.
+				// The Twenty Twenty-One theme.
 				darkStyleId: 'twenty-twenty-one-style-css',
 				darkElement: document.body,
 				darkClass: 'is-dark-theme',
@@ -223,14 +259,16 @@ class HCaptcha {
 	}
 
 	/**
-	 * Observe dark mode changes and apply auto theme.
+	 * Observe dark mode changes and apply the auto theme.
 	 */
 	observeDarkMode() {
-		if ( this.observing ) {
+		let scheduledRebind = false;
+
+		if ( this.observingDarkMode ) {
 			return;
 		}
 
-		this.observing = true;
+		this.observingDarkMode = true;
 
 		const params = this.getParams();
 
@@ -239,6 +277,8 @@ class HCaptcha {
 		}
 
 		const observerCallback = ( mutationList ) => {
+			let darkClassToggled = false;
+
 			for ( const mutation of mutationList ) {
 				let oldClasses = mutation.oldValue;
 				let newClasses = this.darkElement.getAttribute( 'class' );
@@ -251,14 +291,24 @@ class HCaptcha {
 					.concat( oldClasses.filter( ( item ) => ! newClasses.includes( item ) ) );
 
 				if ( diff.includes( this.darkClass ) ) {
-					this.bindEvents();
+					darkClassToggled = true;
 				}
+			}
+
+			if ( darkClassToggled && ! scheduledRebind ) {
+				scheduledRebind = true;
+
+				requestAnimationFrame( () => {
+					this.bindEvents();
+
+					scheduledRebind = false;
+				} );
 			}
 		};
 
 		this.setDarkData();
 
-		// Add observer if there is a known dark mode provider.
+		// Add an observer if there is a known dark mode provider.
 		if ( this.darkElement && this.darkClass ) {
 			const config = {
 				attributes: true,
@@ -268,6 +318,94 @@ class HCaptcha {
 
 			observer.observe( this.darkElement, config );
 		}
+	}
+
+	/**
+	 * Observe password managers.
+	 */
+	observePasswordManagers() {
+		if ( this.observingPasswordManagers ) {
+			return;
+		}
+
+		this.observingPasswordManagers = true;
+
+		let isProcessing = false;
+
+		const observer = new MutationObserver( ( mutations ) => {
+			if ( isProcessing ) {
+				return;
+			}
+
+			isProcessing = true;
+
+			requestAnimationFrame( () => {
+				for ( const mutation of mutations ) {
+					if ( ! ( mutation.type === 'childList' ) ) {
+						continue;
+					}
+
+					const el1Pass = document.querySelector( 'com-1password-button' );
+					const elLastPass = document.querySelector( 'div[data-lastpass-icon-root]' );
+
+					if ( ! el1Pass && ! elLastPass ) {
+						continue;
+					}
+
+					observer.disconnect(); // Stop observer after a password manager element was found.
+
+					this.foundForms.map( ( form ) => {
+						const { hCaptchaId, submitButtonElement } = form;
+
+						if ( ! submitButtonElement ) {
+							return form;
+						}
+
+						const formElement = document.querySelector( `[data-h-captcha-id="${ hCaptchaId }"]` );
+
+						/**
+						 * @type {HTMLElement}
+						 */
+						const hcaptchaElement = formElement.querySelector( '.h-captcha' );
+						const dataset = hcaptchaElement.dataset;
+
+						if ( dataset.size === 'invisible' || dataset.force === 'true' ) {
+							// Do not add the event listener again.
+							return form;
+						}
+
+						hcaptchaElement.dataset.force = 'true';
+
+						submitButtonElement.addEventListener( 'click', this.validate, true );
+
+						return form;
+					} );
+
+					break;
+				}
+
+				isProcessing = false;
+			} );
+		} );
+
+		observer.observe( document.body, { childList: true, subtree: true } );
+	}
+
+	/**
+	 * Get widget by token.
+	 *
+	 * @param {string} token Token.
+	 *
+	 * @return {HTMLDivElement} Widget.
+	 */
+	getWidgetByToken( token ) {
+		const responses = document.querySelectorAll( this.responseSelector );
+
+		const response = [ ...responses ].find( ( el ) => {
+			return el.value === token;
+		} );
+
+		return response ? response.closest( '.h-captcha' ) : null;
 	}
 
 	/**
@@ -283,12 +421,12 @@ class HCaptcha {
 		);
 
 		const params = this.getParams();
-		const iframe = document.querySelector( 'iframe[data-hcaptcha-response="' + token + '"]' );
-		const hcaptcha = iframe ? iframe.closest( '.h-captcha' ) : null;
+		const hcaptcha = this.getWidgetByToken( token );
 		const force = hcaptcha ? hcaptcha.dataset.force : null;
 
 		if (
 			params.size === 'invisible' ||
+
 			// Prevent form submit when hCaptcha widget was manually solved.
 			( force === 'true' && this.isValidated() )
 		) {
@@ -311,6 +449,8 @@ class HCaptcha {
 		params.theme = 'light';
 
 		if ( ! this.darkElement ) {
+			params.theme = window?.matchMedia( '(prefers-color-scheme: dark)' ).matches ? 'dark' : 'light';
+
 			return params;
 		}
 
@@ -325,16 +465,126 @@ class HCaptcha {
 	}
 
 	/**
-	 * Render hCaptcha.
+	 * Render hCaptcha explicitly.
 	 *
 	 * @param {HTMLDivElement} hcaptchaElement hCaptcha element.
+	 *
+	 * @return {string} Widget ID.
 	 */
 	render( hcaptchaElement ) {
 		this.observeDarkMode();
+		this.observePasswordManagers();
 
-		const params = this.applyAutoTheme( this.getParams() );
+		let globalParams = this.getParams();
 
-		hcaptcha.render( hcaptchaElement, params );
+		// Do not overwrite a custom theme.
+		if ( typeof globalParams.theme === 'object' ) {
+			// noinspection JSUnresolvedReference
+			const bg = globalParams?.theme?.component?.checkbox?.main?.fill ?? '';
+
+			if ( bg ) {
+				hcaptchaElement.dataset.theme = 'custom';
+			}
+		} else {
+			globalParams.theme = hcaptchaElement.dataset.theme;
+		}
+
+		globalParams.size = hcaptchaElement.dataset.size;
+		globalParams = this.applyAutoTheme( globalParams );
+
+		return hcaptcha.render( hcaptchaElement, globalParams );
+	}
+
+	/**
+	 * Add an event listener that syncs with the DOMContentLoaded event.
+	 *
+	 * @param {Function} callback
+	 */
+	addSyncedEventListener( callback ) {
+		// Sync with DOMContentLoaded event.
+		if ( document.readyState === 'loading' ) {
+			if ( this.addedDCLCallbacks.has( callback ) ) {
+				return;
+			}
+
+			this.addedDCLCallbacks.add( callback );
+
+			window.addEventListener( 'DOMContentLoaded', callback );
+		} else {
+			callback();
+		}
+	}
+
+	/**
+	 * Move honeypot input to a random position among visible inputs in the form.
+	 *
+	 * @param {HTMLElement} formElement Form element.
+	 */
+	moveHP( formElement ) {
+		// Guard: valid element and move only once per form lifecycle (prevent reentrancy).
+		if ( ! formElement || formElement?.dataset?.hpMoved === '1' ) {
+			return;
+		}
+
+		// Mark as moved early to avoid recursive re-entry via DOM observers.
+		formElement.dataset.hpMoved = '1';
+
+		const hpInput = formElement.querySelector( 'input[id^="hcap_hp_"]' );
+
+		if ( ! hpInput ) {
+			return;
+		}
+
+		const inputs = [ ...formElement.querySelectorAll( 'input,select,textarea,button' ) ]
+			// Do not insert inside .h-captcha element - it may be re-rendered later.
+			.filter( ( el ) => el !== hpInput && el.type !== 'hidden' && ! el.closest( '.h-captcha' ) );
+
+		if ( ! inputs.length ) {
+			return;
+		}
+
+		// Choose a random reference position.
+		const idx = Math.floor( Math.random() * inputs.length );
+		const ref = inputs[ idx ];
+
+		if ( ! ( ref && ref.parentNode ) ) {
+			return;
+		}
+
+		const inputId = hpInput.getAttribute( 'id' ) ?? '';
+		const label = inputId ? formElement.querySelector( `label[for="${ inputId }"]` ) : null;
+		const frag = document.createDocumentFragment();
+
+		if ( label && label.isConnected ) {
+			frag.appendChild( label );
+		}
+
+		frag.appendChild( hpInput );
+		ref.parentNode.insertBefore( frag, ref );
+	}
+
+	addFSTToken( formElement ) {
+		if ( ! formElement ) {
+			return;
+		}
+
+		const name = 'hcap_fst_token';
+
+		// Find or create input.
+		let input = formElement.querySelector( `input[type="hidden"][name="${ name }"]` );
+
+		if ( ! input ) {
+			input = document.createElement( 'input' );
+			input.type = 'hidden';
+			input.name = name;
+		}
+
+		// Insert input.
+		if ( formElement.firstChild ) {
+			formElement.insertBefore( input, formElement.firstChild );
+		} else {
+			formElement.appendChild( input );
+		}
 	}
 
 	/**
@@ -358,6 +608,7 @@ class HCaptcha {
 			', .forminator-button-submit, .frm_button_submit, a.sdm_download' +
 			', .uagb-forms-main-submit-button' // Spectra.
 		);
+		this.responseSelector = 'textarea[name="h-captcha-response"]';
 
 		this.getForms().map( ( formElement ) => {
 			const hcaptchaElement = formElement.querySelector( '.h-captcha' );
@@ -372,35 +623,28 @@ class HCaptcha {
 				return formElement;
 			}
 
-			const iframe = hcaptchaElement.querySelector( 'iframe' );
+			this.moveHP( formElement );
+			this.addFSTToken( formElement );
 
-			// Re-render.
-			if ( null !== iframe ) {
-				iframe.remove();
-			}
+			// Render or re-render.
+			hcaptchaElement.innerHTML = '';
 
-			this.render( hcaptchaElement );
-
-			if (
-				( 'invisible' !== hcaptchaElement.dataset.size ) &&
-				( 'true' !== hcaptchaElement.dataset.force )
-			) {
-				return formElement;
-			}
-
+			const hCaptchaId = this.generateID();
 			const submitButtonElement = formElement.querySelectorAll( this.submitButtonSelector )[ 0 ];
+			const widgetId = this.render( hcaptchaElement );
+			formElement.dataset.hCaptchaId = hCaptchaId;
+
+			this.foundForms.push( { hCaptchaId, submitButtonElement, widgetId } );
 
 			if ( ! submitButtonElement ) {
 				return formElement;
 			}
 
-			const hCaptchaId = this.generateID();
+			const dataset = hcaptchaElement.dataset;
 
-			this.foundForms.push( { hCaptchaId, submitButtonElement } );
-
-			formElement.dataset.hCaptchaId = hCaptchaId;
-
-			submitButtonElement.addEventListener( 'click', this.validate, true );
+			if ( dataset.size === 'invisible' || dataset.force === 'true' ) {
+				submitButtonElement.addEventListener( 'click', this.validate, true );
+			}
 
 			return formElement;
 		}, this );
@@ -425,14 +669,18 @@ class HCaptcha {
 	 * Submit a form containing hCaptcha.
 	 */
 	submit() {
-		const formElement = this.currentForm.formElement;
-		const submitButtonElement = this.currentForm.submitButtonElement;
+		if ( ! this.currentForm ) {
+			return;
+		}
+
+		const { formElement, submitButtonElement } = this.currentForm;
 
 		if (
 			'form' !== formElement.tagName.toLowerCase() ||
 			this.isAjaxSubmitButton( submitButtonElement )
 		) {
 			submitButtonElement.removeEventListener( 'click', this.validate, true );
+
 			submitButtonElement.click();
 
 			return;
@@ -445,5 +693,7 @@ class HCaptcha {
 		}
 	}
 }
+
+window.HCaptchaMainObject = window.HCaptchaMainObject || {};
 
 export default HCaptcha;

@@ -12,8 +12,8 @@
 
 namespace HCaptcha\Helpers;
 
-use HCaptcha\Vendor\MatthiasMullie\Minify\CSS;
-use HCaptcha\Vendor\MatthiasMullie\Minify\JS;
+use HCaptcha\Helpers\Minify\CSS;
+use HCaptcha\Helpers\Minify\JS;
 use WP_Error;
 
 /**
@@ -63,18 +63,20 @@ class HCaptcha {
 	public static function form_display( array $args = [] ): void {
 		$settings          = hcaptcha()->settings();
 		$hcaptcha_site_key = $settings->get_site_key();
-		$hcaptcha_theme    = $settings->get_theme();
 		$hcaptcha_force    = $settings->is_on( 'force' );
+		$hcaptcha_theme    = $settings->get_theme();
 		$hcaptcha_size     = $settings->get( 'size' );
-		$allowed_sizes     = [ 'normal', 'compact', 'invisible' ];
 
 		$args = wp_parse_args(
 			$args,
 			[
 				'action'  => '', // Action name for wp_nonce_field.
 				'name'    => '', // Nonce name for wp_nonce_field.
+				'sign'    => '', // Signature group.
 				'auto'    => false, // Whether a form has to be auto-verified.
-				'force'   => $hcaptcha_force, // Whether to execute hCaptcha widget before submit (like for invisible).
+				'ajax'    => false, // Whether a form has to be auto-verified in ajax.
+				'force'   => $hcaptcha_force, // Whether to execute hCaptcha widget before submitting (like for invisible).
+				'theme'   => $hcaptcha_theme, // The hCaptcha theme.
 				'size'    => $hcaptcha_size, // The hCaptcha widget size.
 				/**
 				 * The hCaptcha widget id.
@@ -85,32 +87,31 @@ class HCaptcha {
 				 * ]
 				 */
 				'id'      => [],
-				// Protection status. When true, hCaptcha should be added.
-				'protect' => true,
+				'protect' => true, // Protection status. When true, hCaptcha should be added.
 			]
 		);
 
 		/**
-		 * Filters the form arguments.
+		 * Filters the hCaptcha form arguments.
 		 *
-		 * @param array $args The form arguments.
+		 * @param array $args The hCaptcha form arguments.
 		 */
 		$args = (array) apply_filters( 'hcap_form_args', $args );
 
-		$args['action']  = (string) $args['action'];
-		$args['name']    = (string) $args['name'];
-		$args['auto']    = filter_var( $args['auto'], FILTER_VALIDATE_BOOLEAN );
-		$args['force']   = filter_var( $args['force'], FILTER_VALIDATE_BOOLEAN );
-		$args['size']    = in_array( $args['size'], $allowed_sizes, true ) ? $args['size'] : $hcaptcha_size;
-		$args['id']      = (array) $args['id'];
-		$args['protect'] = filter_var( $args['protect'], FILTER_VALIDATE_BOOLEAN );
+		$args = self::validate_args( $args );
 
-		$id = wp_parse_args(
-			$args['id'],
-			self::$default_id
-		);
+		/**
+		 * Register hCaptcha form.
+		 *
+		 * @param array $args The hCaptcha form arguments.
+		 */
+		do_action( 'hcap_register_form', $args );
 
-		self::display_widget( $id );
+		self::display_widget( $args['id'] );
+
+		if ( $args['sign'] ) {
+			do_action( 'hcap_signature_' . $args['sign'], $args );
+		}
 
 		hcaptcha()->form_shown = true;
 
@@ -123,49 +124,221 @@ class HCaptcha {
 		 */
 		if (
 			! $args['protect'] ||
-			! apply_filters( 'hcap_protect_form', true, $id['source'], $id['form_id'] )
+			! apply_filters( 'hcap_protect_form', true, $args['id']['source'], $args['id']['form_id'] )
 		) {
 			return;
 		}
 
 		?>
-		<div
-				class="h-captcha"
-				data-sitekey="<?php echo esc_attr( $hcaptcha_site_key ); ?>"
-				data-theme="<?php echo esc_attr( $hcaptcha_theme ); ?>"
-				data-size="<?php echo esc_attr( $args['size'] ); ?>"
-				data-auto="<?php echo $args['auto'] ? 'true' : 'false'; ?>"
-				data-force="<?php echo $args['force'] ? 'true' : 'false'; ?>">
-		</div>
+		<h-captcha
+			class="h-captcha"
+			data-sitekey="<?php echo esc_attr( $hcaptcha_site_key ); ?>"
+			data-theme="<?php echo esc_attr( $args['theme'] ); ?>"
+			data-size="<?php echo esc_attr( $args['size'] ); ?>"
+			data-auto="<?php echo $args['auto'] ? 'true' : 'false'; ?>"
+			data-ajax="<?php echo $args['ajax'] ? 'true' : 'false'; ?>"
+			data-force="<?php echo $args['force'] ? 'true' : 'false'; ?>">
+		</h-captcha>
 		<?php
 
 		if ( ! empty( $args['action'] ) && ! empty( $args['name'] ) ) {
 			wp_nonce_field( $args['action'], $args['name'] );
 		}
+
+		self::honeypot_display();
 	}
 
 	/**
-	 * Display widget.
+	 * Validate hCaptcha form arguments.
 	 *
-	 * @param array|mixed $id The hCaptcha widget id.
+	 * @param array $args Arguments.
+	 *
+	 * @return array
+	 */
+	private static function validate_args( array $args ): array {
+		$settings       = hcaptcha()->settings();
+		$hcaptcha_theme = $settings->get_theme();
+		$hcaptcha_size  = $settings->get( 'size' );
+		$bg             = $settings->get_custom_theme_background();
+
+		$allowed_themes = [ 'light', 'dark', 'auto' ];
+		$allowed_sizes  = [ 'normal', 'compact', 'invisible' ];
+
+		$args['action']  = (string) $args['action'];
+		$args['name']    = (string) $args['name'];
+		$args['sign']    = (string) $args['sign'];
+		$auto            = filter_var( $args['auto'], FILTER_VALIDATE_BOOLEAN );
+		$args['ajax']    = filter_var( $args['ajax'], FILTER_VALIDATE_BOOLEAN );
+		$args['auto']    = $args['ajax'] ? true : $auto;
+		$args['force']   = filter_var( $args['force'], FILTER_VALIDATE_BOOLEAN );
+		$args['theme']   = in_array( (string) $args['theme'], $allowed_themes, true )
+			? (string) $args['theme']
+			: $hcaptcha_theme;
+		$args['theme']   = $bg ? 'custom' : $args['theme'];
+		$args['size']    = in_array( (string) $args['size'], $allowed_sizes, true )
+			? (string) $args['size']
+			: $hcaptcha_size;
+		$args['id']      = (array) $args['id'];
+		$args['id']      = [
+			'source'  => (array) ( empty( $args['id']['source'] ) ? self::$default_id['source'] : $args['id']['source'] ),
+			'form_id' => $args['id']['form_id'] ?? self::$default_id['form_id'],
+		];
+		$args['protect'] = filter_var( $args['protect'], FILTER_VALIDATE_BOOLEAN );
+
+		return $args;
+	}
+
+	/**
+	 * Display a honeypot for form submissions.
+	 *
+	 * This method injects a honeypot field with a dynamic name and a signature.
 	 *
 	 * @return void
 	 */
-	private static function display_widget( array $id ): void {
+	private static function honeypot_display(): void {
+		if ( ! hcaptcha()->settings()->is_on( 'honeypot' ) ) {
+			return;
+		}
+
+		$hp_name = self::get_hp_name();
+		$hp_sig  = wp_create_nonce( $hp_name );
+
+		?>
+		<label for="<?php echo esc_attr( $hp_name ); ?>"></label>
+		<input
+				type="text" id="<?php echo esc_attr( $hp_name ); ?>" name="<?php echo esc_attr( $hp_name ); ?>" value=""
+				readonly inputmode="none" autocomplete="new-password" tabindex="-1" aria-hidden="true"
+				style="position:absolute; left:-9999px; top:auto; height:0; width:0; opacity:0;"/>
+		<input type="hidden" name="hcap_hp_sig" value="<?php echo esc_attr( $hp_sig ); ?>"/>
+		<?php
+	}
+
+	/**
+	 * Get honeypot name.
+	 * Made as a separate function to be able to mock it in tests.
+	 *
+	 * @return string
+	 */
+	protected static function get_hp_name(): string {
+		return 'hcap_hp_' . wp_generate_password( 12, false );
+	}
+
+	/**
+	 * Get widget id value.
+	 *
+	 * @param array $id The hCaptcha widget id.
+	 *
+	 * @return string
+	 */
+	public static function widget_id_value( array $id ): string {
 		$id['source']  = (array) ( $id['source'] ?? [] );
 		$id['form_id'] = $id['form_id'] ?? 0;
 
 		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
 		$encoded_id = base64_encode( wp_json_encode( $id ) );
-		$widget_id  = $encoded_id . '-' . wp_hash( $encoded_id );
 
+		return $encoded_id . '-' . wp_hash( $encoded_id );
+	}
+
+	/**
+	 * Display widget.
+	 *
+	 * @param array $id The hCaptcha widget id.
+	 *
+	 * @return void
+	 */
+	private static function display_widget( array $id ): void {
 		?>
 		<input
 				type="hidden"
 				class="<?php echo esc_attr( self::HCAPTCHA_WIDGET_ID ); ?>"
 				name="<?php echo esc_attr( self::HCAPTCHA_WIDGET_ID ); ?>"
-				value="<?php echo esc_attr( $widget_id ); ?>">
+				value="<?php echo esc_attr( self::widget_id_value( $id ) ); ?>">
 		<?php
+	}
+
+	/**
+	 * Get widget.
+	 *
+	 * @param array $id The hCaptcha widget id.
+	 *
+	 * @return string
+	 */
+	public static function get_widget( array $id ): string {
+		ob_start();
+
+		self::display_widget( $id );
+
+		return (string) ob_get_clean();
+	}
+
+	/**
+	 * Check widget.
+	 *
+	 * @param string     $class_name Class name.
+	 * @param int|string $form_id    Form id.
+	 *
+	 * @return bool|null True if the widget is valid, false if not or does not exist.
+	 *                   Null if valid and created by the same $class_name and $form_id.
+	 */
+	public static function check_widget( string $class_name, $form_id ): ?bool {
+		$hashed_id_field = self::HCAPTCHA_WIDGET_ID;
+
+		// Nonce is checked in \HCaptcha\Helpers\API::verify_post().
+		// phpcs:disable WordPress.Security.NonceVerification.Missing
+		$hashed_id = isset( $_POST[ $hashed_id_field ] ) ?
+			filter_var( wp_unslash( $_POST[ $hashed_id_field ] ), FILTER_SANITIZE_FULL_SPECIAL_CHARS ) :
+			'';
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
+
+		if ( ! $hashed_id ) {
+			return false;
+		}
+
+		$hashed_id_arr = explode( '-', $hashed_id );
+		$encoded_id    = $hashed_id_arr[0];
+		$hash          = $hashed_id_arr[1] ?? '';
+
+		$id = wp_parse_args(
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
+			(array) json_decode( base64_decode( $encoded_id ), true ),
+			self::$default_id
+		);
+
+		$info = [
+			'id'         => $id,
+			'encoded_id' => $encoded_id,
+			'hash'       => $hash,
+		];
+
+		if ( wp_hash( $info['encoded_id'] ) !== $info['hash'] ) {
+			return false;
+		}
+
+		if (
+			$form_id !== $info['id']['form_id'] ||
+			self::get_class_source( $class_name ) !== $info['id']['source']
+		) {
+			return true;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get signature.
+	 *
+	 * @param string     $class_name     Class name.
+	 * @param int|string $form_id        Form id.
+	 * @param bool       $hcaptcha_shown The hCaptcha was shown.
+	 *
+	 * @return string
+	 */
+	public static function get_signature( string $class_name, $form_id, bool $hcaptcha_shown ): string {
+		ob_start();
+		self::display_signature( $class_name, $form_id, $hcaptcha_shown );
+
+		return (string) ob_get_clean();
 	}
 
 	/**
@@ -193,22 +366,28 @@ class HCaptcha {
 	/**
 	 * Check signature.
 	 *
-	 * @param string     $class_name Class name.
-	 * @param int|string $form_id    Form id.
+	 * @param string          $class_name Class name.
+	 * @param int|string|null $form_id    Form id. Do not check if null.
 	 *
-	 * @return bool|null True if signature is valid, false if not or does not exist.
-	 *                     Null if valid and hCaptcha was shown.
+	 * @return bool|null True if the signature is valid, false if not or does not exist.
+	 *                   Null if valid and hCaptcha was shown.
 	 */
-	public static function check_signature( string $class_name, $form_id ): ?bool {
+	public static function check_signature( string $class_name, $form_id = null ): ?bool {
 		$info = self::decode_id_info(
 		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
 			self::HCAPTCHA_SIGNATURE . '-' . base64_encode( $class_name )
 		);
 
 		if (
-			$form_id !== $info['id']['form_id'] ||
 			self::get_class_source( $class_name ) !== $info['id']['source'] ||
 			wp_hash( $info['encoded_id'] ) !== $info['hash']
+		) {
+			return false;
+		}
+
+		if (
+			null !== $form_id &&
+			$form_id !== $info['id']['form_id']
 		) {
 			return false;
 		}
@@ -219,9 +398,9 @@ class HCaptcha {
 	/**
 	 * Whether form protection is enabled/disabled via hCaptcha widget id.
 	 *
-	 * Return false(protection disabled) in only one case:
-	 * when $_POST['hcaptcha-widget-id'] contains encoded id with proper hash
-	 * and hcap_protect_form filter confirms that form referenced in widget id is not protected.
+	 * Return false (protection disabled) in only one case:
+	 * when $_POST['hcaptcha-widget-id'] contains encoded id with proper hash,
+	 * and hcap_protect_form filter confirms that the form referenced in widget id is not protected.
 	 *
 	 * @return bool
 	 */
@@ -249,7 +428,7 @@ class HCaptcha {
 	}
 
 	/**
-	 * Get source which class serves.
+	 * Get a source which class serves.
 	 *
 	 * @param string $class_name Class name.
 	 *
@@ -319,13 +498,13 @@ class HCaptcha {
 	 * @noinspection PhpMissingParamTypeInspection
 	 */
 	public static function add_error_message( $errors, $error_message ): WP_Error {
+		$errors = is_wp_error( $errors ) ? $errors : new WP_Error();
+
 		if ( null === $error_message ) {
 			return $errors;
 		}
 
 		$code = array_search( $error_message, hcap_get_error_messages(), true ) ?: 'fail';
-
-		$errors = is_wp_error( $errors ) ? $errors : new WP_Error();
 
 		if ( ! isset( $errors->errors[ $code ] ) || ! in_array( $error_message, $errors->errors[ $code ], true ) ) {
 			$errors->add( $code, $error_message );
@@ -343,6 +522,8 @@ class HCaptcha {
 	 * @return void
 	 */
 	public static function css_display( string $css, bool $wrap = true ): void {
+		$css = trim( $css, " \n\r" );
+
 		if ( $wrap ) {
 			echo "<style>\n";
 		}
@@ -361,8 +542,11 @@ class HCaptcha {
 	 * @param string $css CSS.
 	 *
 	 * @return string
+	 * @noinspection PhpUndefinedMethodInspection
 	 */
 	public static function css_minify( string $css ): string {
+		$css = trim( $css, " \n\r" );
+
 		if ( defined( 'SCRIPT_DEBUG' ) && constant( 'SCRIPT_DEBUG' ) ) {
 			return $css;
 		}
@@ -384,6 +568,8 @@ class HCaptcha {
 	 * @noinspection PhpUnused
 	 */
 	public static function js_display( string $js, bool $wrap = true ): void {
+		$js = trim( $js, " \n\r" );
+
 		if ( $wrap ) {
 			echo "<script>\n";
 		}
@@ -402,8 +588,11 @@ class HCaptcha {
 	 * @param string $js JavaScript.
 	 *
 	 * @return string
+	 * @noinspection PhpUndefinedMethodInspection
 	 */
 	public static function js_minify( string $js ): string {
+		$js = trim( $js, " \n\r" );
+
 		if ( defined( 'SCRIPT_DEBUG' ) && constant( 'SCRIPT_DEBUG' ) ) {
 			return $js;
 		}
@@ -791,7 +980,7 @@ class HCaptcha {
 	public static function decode_id_info( string $hashed_id_field = '' ): array {
 		$hashed_id_field = $hashed_id_field ?: self::HCAPTCHA_WIDGET_ID;
 
-		// Nonce is checked in hcaptcha_verify_post().
+		// Nonce is checked in \HCaptcha\Helpers\API::verify_post().
 		// phpcs:disable WordPress.Security.NonceVerification.Missing
 		$hashed_id = isset( $_POST[ $hashed_id_field ] ) ?
 			filter_var( wp_unslash( $_POST[ $hashed_id_field ] ), FILTER_SANITIZE_FULL_SPECIAL_CHARS ) :
@@ -810,7 +999,9 @@ class HCaptcha {
 			];
 		}
 
-		[ $encoded_id, $hash ] = explode( '-', $hashed_id );
+		$hashed_id_arr = explode( '-', $hashed_id );
+		$encoded_id    = $hashed_id_arr[0];
+		$hash          = $hashed_id_arr[1] ?? '';
 
 		$id = wp_parse_args(
 		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
@@ -856,12 +1047,12 @@ class HCaptcha {
 	 */
 	public static function add_type_module( string $tag ): string {
 		$search  = [
-			'/type=".+?"/',
+			'/type=".+?" /',
 			'/<script /',
 		];
 		$replace = [
 			'',
-			'<script type="module"',
+			'<script type="module" ',
 		];
 
 		return (string) preg_replace( $search, $replace, $tag );

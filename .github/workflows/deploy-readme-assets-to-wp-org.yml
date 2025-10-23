@@ -9,10 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: WordPress.org plugin asset/readme update
-        uses: 10up/action-wordpress-plugin-asset-update@stable
+        uses: hCaptcha/action-wordpress-plugin-asset-update@534608af7e569c58d740c7493117d73bd6467122
         env:
           SLUG: hcaptcha-for-forms-and-more
           SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}

@@ -1,6 +1,6 @@
 <?php
 /**
- * Form class file.
+ * 'Form' class file.
  *
  * @package hcaptcha-wp
  */
@@ -10,6 +10,7 @@
 
 namespace HCaptcha\WPForms;
 
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 
 /**
@@ -26,6 +27,11 @@ class Form {
 	 * Nonce name.
 	 */
 	public const NAME = 'hcaptcha_wpforms_nonce';
+
+	/**
+	 * Script handle.
+	 */
+	private const HANDLE = 'hcaptcha-wpforms';
 
 	/**
 	 * Whether hCaptcha should be auto-added to any form.
@@ -55,6 +61,10 @@ class Form {
 	 * @return void
 	 */
 	protected function init_hooks(): void {
+		if ( ! function_exists( 'wpforms' ) ) {
+			return;
+		}
+
 		$this->mode_auto  = hcaptcha()->settings()->is( 'wpforms_status', 'form' );
 		$this->mode_embed =
 			hcaptcha()->settings()->is( 'wpforms_status', 'embed' ) &&
@@ -66,7 +76,7 @@ class Form {
 
 		if ( $this->mode_embed ) {
 			add_filter( 'wpforms_admin_settings_captcha_enqueues_disable', [ $this, 'wpforms_admin_settings_captcha_enqueues_disable' ] );
-			add_filter( 'hcap_print_hcaptcha_scripts', [ $this, 'hcap_print_hcaptcha_scripts' ] );
+			add_filter( 'hcap_print_hcaptcha_scripts', [ $this, 'hcap_print_hcaptcha_scripts' ], 0 );
 			add_filter( 'wpforms_settings_fields', [ $this, 'wpforms_settings_fields' ], 10, 2 );
 		}
 
@@ -76,6 +86,8 @@ class Form {
 		add_action( 'wpforms_frontend_output', [ $this, 'wpforms_frontend_output' ], 19, 5 );
 		add_filter( 'wpforms_process_bypass_captcha', '__return_true' );
 		add_action( 'wpforms_process', [ $this, 'verify' ], 10, 3 );
+
+		add_action( 'wp_print_footer_scripts', [ $this, 'enqueue_scripts' ], 9 );
 	}
 
 	/**
@@ -104,10 +116,7 @@ class Form {
 			$wpforms_error_message = wpforms_setting( 'hcaptcha-fail-msg' );
 		}
 
-		$error_message = hcaptcha_get_verify_message(
-			self::NAME,
-			self::ACTION
-		);
+		$error_message = API::verify_post( self::NAME, self::ACTION );
 
 		if ( null !== $error_message ) {
 			wpforms()->get( 'process' )->errors[ $form_data['id'] ]['footer'] = $wpforms_error_message ?: $error_message;
@@ -121,7 +130,8 @@ class Form {
 	 * @noinspection CssUnusedSymbol
 	 */
 	public function print_inline_styles(): void {
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	div.wpforms-container-full .wpforms-form .h-captcha {
 		position: relative;
 		display: block;
@@ -147,7 +157,7 @@ class Form {
 	div.wpforms-container-full .wpforms-form .h-captcha iframe {
 		position: relative;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}
@@ -192,7 +202,7 @@ CSS;
 		}
 
 		if ( isset( $fields['hcaptcha-heading'] ) ) {
-			$notice_content = <<<HTML
+			$notice_content = '
 <div
 		id="wpforms-setting-row-hcaptcha-heading"
 		class="wpforms-setting-row wpforms-setting-row-content wpforms-clear section-heading specific-note">
@@ -204,13 +214,13 @@ CSS;
 				</svg>
 			</div>
 			<div class="wpforms-specific-note-content">
-				<p><strong>$label</strong></p>
-				<p>$description</p>
+				<p><strong>' . $label . '</strong></p>
+				<p>' . $description . '</p>
 			</div>
 		</div>
 	</span>
 </div>
-HTML;
+';
 
 			$fields['hcaptcha-heading'] .= $notice_content;
 		}
@@ -249,7 +259,7 @@ HTML;
 	}
 
 	/**
-	 * Block recaptcha assets on frontend.
+	 * Block recaptcha assets on the frontend.
 	 *
 	 * @return void
 	 */
@@ -308,6 +318,27 @@ HTML;
 		if ( $this->mode_auto ) {
 			$this->show_hcaptcha( $form_data );
 		}
+	}
+
+	/**
+	 * Enqueue scripts.
+	 *
+	 * @return void
+	 */
+	public function enqueue_scripts(): void {
+		if ( ! hcaptcha()->form_shown ) {
+			return;
+		}
+
+		$min = hcap_min_suffix();
+
+		wp_enqueue_script(
+			self::HANDLE,
+			HCAPTCHA_URL . "/assets/js/hcaptcha-wpforms$min.js",
+			[ 'jquery', 'hcaptcha' ],
+			HCAPTCHA_VERSION,
+			true
+		);
 	}
 
 	/**
@@ -405,7 +436,7 @@ HTML;
 
 	/**
 	 * Process hCaptcha in the form.
-	 * Returns true if form has hCaptcha or hCaptcha will be auto-added.
+	 * Returns true if the form has hCaptcha or hCaptcha will be auto-added.
 	 *
 	 * @param array $form_data Form data.
 	 *

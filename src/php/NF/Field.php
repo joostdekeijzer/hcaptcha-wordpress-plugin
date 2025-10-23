@@ -12,28 +12,29 @@
 
 namespace HCaptcha\NF;
 
+use HCaptcha\Helpers\API;
 use NF_Abstracts_Field;
 
 /**
  * Class Field
  */
-class Field extends NF_Abstracts_Field {
+class Field extends NF_Abstracts_Field implements Base {
 
 	// phpcs:disable PSR2.Classes.PropertyDeclaration.Underscore
 
 	/**
-	 * Name.
+	 * Field name.
 	 *
 	 * @var string
 	 */
-	protected $_name = 'hcaptcha-for-ninja-forms';
+	protected $_name = self::NAME;
 
 	/**
-	 * Type.
+	 * Filed type.
 	 *
 	 * @var string
 	 */
-	protected $_type = 'hcaptcha';
+	protected $_type = self::TYPE;
 
 	/**
 	 * Section.
@@ -73,7 +74,7 @@ class Field extends NF_Abstracts_Field {
 	public function __construct() {
 		parent::__construct();
 
-		$this->_nicename = __( 'hCaptcha', 'ninja-forms' );
+		$this->_nicename = __( 'hCaptcha', 'hcaptcha-for-forms-and-more' );
 
 		add_filter( 'nf_sub_hidden_field_types', [ $this, 'hide_field_type' ] );
 	}
@@ -90,7 +91,7 @@ class Field extends NF_Abstracts_Field {
 	public function validate( $field, $data ): ?string {
 		$value = $field['value'] ?? '';
 
-		return hcaptcha_request_verify( $value );
+		return API::verify_request( $value );
 	}
 
 	/**

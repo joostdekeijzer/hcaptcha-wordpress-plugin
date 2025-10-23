@@ -7,6 +7,7 @@
 
 namespace HCaptcha\Settings;
 
+use HCaptcha\Helpers\Request;
 use HCaptcha\Migrations\Migrations;
 use KAGG\Settings\Abstracts\SettingsBase;
 
@@ -186,7 +187,7 @@ class SystemInfo extends PluginSettingsBase {
 		// Other section.
 		$data .= $this->data( 'Turn Off When Logged In', $this->is_on( 'off_when_logged_in' ) );
 		$data .= $this->data( 'Disable reCAPTCHA Compatibility', $this->is_on( 'recaptcha_compat_off' ) );
-		$data .= $this->data( 'Whitelisted IPs', $this->is_empty( $settings->get( 'whitelisted_ips' ) ) );
+		$data .= $this->data( 'Allowlisted IPs', $this->is_empty( $settings->get( 'whitelisted_ips' ) ) );
 		$data .= $this->data( 'Login attempts before hCaptcha', $settings->get( 'login_limit' ) );
 		$data .= $this->data( 'Failed login attempts interval, min', $settings->get( 'login_interval' ) );
 		$data .= $this->data( 'Delay showing hCaptcha, ms', $settings->get( 'delay' ) );
@@ -216,18 +217,25 @@ class SystemInfo extends PluginSettingsBase {
 	public function integration_info(): string {
 		[ $integration_fields, $integration_settings ] = $this->get_integrations();
 
+		$header   = true;
 		$disabled = false;
 
-		$data = $this->header( '--- Active plugins and themes ---' );
+		$data = $this->header( '--- Integrations header info ---' );
 
 		foreach ( $integration_fields as $field_key => $field ) {
+			if ( $header && 'header' !== ( $field['section'] ?? '' ) ) {
+				$header = false;
+
+				$data .= $this->header( '--- Active plugins and themes ---' );
+			}
+
 			if ( $field['disabled'] !== $disabled ) {
 				$disabled = true;
 
 				$data .= $this->header( '--- Inactive plugins and themes ---' );
 			}
 
-			$data .= $this->data( $field['label'] );
+			$data .= $this->data( $field['label'] ?? '' );
 
 			foreach ( $field['options'] as $option_key => $option ) {
 				$setting = isset( $integration_settings[ $field_key ] ) ? (array) $integration_settings[ $field_key ] : [];
@@ -493,7 +501,7 @@ class SystemInfo extends PluginSettingsBase {
 
 		$data .= $this->data( 'PHP Version', constant( 'PHP_VERSION' ) );
 		$data .= $this->data( 'MySQL Version', $wpdb->db_version() );
-		$data .= $this->data( 'Webserver Info', isset( $_SERVER['SERVER_SOFTWARE'] ) ? sanitize_text_field( wp_unslash( $_SERVER['SERVER_SOFTWARE'] ) ) : '' );
+		$data .= $this->data( 'Webserver Info', Request::filter_input( INPUT_SERVER, 'SERVER_SOFTWARE' ) );
 
 		// PHP configs... now we're getting to the important stuff.
 		$data .= $this->header( '-- PHP Configuration --' );
@@ -553,7 +561,7 @@ class SystemInfo extends PluginSettingsBase {
 
 		$length += 2;
 
-		return $this->mb_str_pad( $key . ': ', $length ) . $value . "\n";
+		return $key ? $this->mb_str_pad( $key . ': ', $length ) . $value . "\n" : '';
 	}
 
 	/**

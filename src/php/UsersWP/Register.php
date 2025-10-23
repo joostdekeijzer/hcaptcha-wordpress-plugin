@@ -1,12 +1,13 @@
 <?php
 /**
- * Register class file.
+ * 'Register' class file.
  *
  * @package hcaptcha-wp
  */
 
 namespace HCaptcha\UsersWP;
 
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 use WP_Error;
 use WP_User;
@@ -51,7 +52,7 @@ class Register {
 	}
 
 	/**
-	 * Start output buffer at the beginning of the template.
+	 * Start the output buffer at the beginning of the template.
 	 *
 	 * @param string $name Template name.
 	 *
@@ -66,7 +67,7 @@ class Register {
 	}
 
 	/**
-	 * Get output buffer at the end of the template and add captcha.
+	 * Get the output buffer at the end of the template and add captcha.
 	 *
 	 * @param string $name Template name.
 	 *
@@ -79,9 +80,7 @@ class Register {
 
 		$template = (string) ob_get_clean();
 
-		ob_start();
-
-		$args = [
+		$args     = [
 			'action' => static::ACTION,
 			'name'   => static::NONCE,
 			'id'     => [
@@ -89,14 +88,11 @@ class Register {
 				'form_id' => 'register',
 			],
 		];
-
-		HCaptcha::form_display( $args );
-
-		$captcha = (string) ob_get_clean();
-		$search  = '<input type="submit"';
+		$hcaptcha = HCaptcha::form( $args );
+		$search   = '/(<(?:input|button) type="submit")/';
 
 		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-		echo str_replace( $search, $captcha . $search, $template );
+		echo preg_replace( $search, $hcaptcha . '$1', $template );
 	}
 
 	/**
@@ -114,10 +110,7 @@ class Register {
 			return $result;
 		}
 
-		$error_message = hcaptcha_get_verify_message_html(
-			self::NONCE,
-			self::ACTION
-		);
+		$error_message = API::verify_post_html( self::NONCE, self::ACTION );
 
 		if ( null === $error_message ) {
 			return $result;

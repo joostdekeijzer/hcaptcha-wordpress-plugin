@@ -7,6 +7,7 @@
 
 namespace HCaptcha\WP;
 
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 use WP_Post;
 
@@ -45,7 +46,7 @@ class PasswordProtected {
 	/**
 	 * Filters the template created by the Download Manager plugin and adds hcaptcha.
 	 *
-	 * @param string|mixed $output The password form HTML output.
+	 * @param string|mixed $output The password form's HTML output.
 	 * @param WP_Post      $post   Post object.
 	 *
 	 * @return string
@@ -74,7 +75,7 @@ class PasswordProtected {
 	 * @noinspection ForgottenDebugOutputInspection
 	 */
 	public function verify(): void {
-		$result = hcaptcha_verify_post( self::NONCE, self::ACTION );
+		$result = API::verify_post( self::NONCE, self::ACTION );
 
 		if ( null === $result ) {
 			return;

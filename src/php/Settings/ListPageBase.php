@@ -8,6 +8,7 @@
 namespace HCaptcha\Settings;
 
 use DateTimeImmutable;
+use Exception;
 
 /**
  * Class ListPageBase.
@@ -34,7 +35,7 @@ abstract class ListPageBase extends PluginSettingsBase {
 	/**
 	 * Base object.
 	 */
-	public const OBJECT = 'HCaptchaFlatPickerObject';
+	public const OBJECT = 'HCaptchaListPageBaseObject';
 
 	/**
 	 * Number of timespan days by default.
@@ -48,9 +49,21 @@ abstract class ListPageBase extends PluginSettingsBase {
 	public const TIMESPAN_DELIMITER = ' - ';
 
 	/**
+	 * Transient name where to store a page bulk action message.
+	 */
+	protected const TRANSIENT = 'hcaptcha_page_base';
+
+	/**
 	 * Default date format.
 	 */
 	private const DATE_FORMAT = 'Y-m-d';
+
+	/**
+	 * Bulk ajax action.
+	 * Must be overridden in child classes.
+	 * Here is for testing purposes.
+	 */
+	public const BULK_ACTION = '';
 
 	/**
 	 * Chart time unit.
@@ -65,6 +78,26 @@ abstract class ListPageBase extends PluginSettingsBase {
 	 * @var bool
 	 */
 	protected $allowed = false;
+
+	/**
+	 * Delete hCaptcha events by IDs.
+	 *
+	 * @param array $args Arguments.
+	 *
+	 * @return bool
+	 */
+	abstract protected function delete_events( array $args ): bool;
+
+	/**
+	 * Init class hooks.
+	 */
+	protected function init_hooks(): void {
+		parent::init_hooks();
+
+		add_action( 'admin_init', [ $this, 'admin_init' ] );
+		add_action( 'kagg_settings_header', [ $this, 'date_picker_display' ] );
+		add_action( 'wp_ajax_' . static::BULK_ACTION, [ $this, 'bulk_action' ] );
+	}
 
 	/**
 	 * Get suggested data format from items array.
@@ -174,6 +207,9 @@ abstract class ListPageBase extends PluginSettingsBase {
 			self::HANDLE,
 			self::OBJECT,
 			[
+				'noAction'  => __( 'Please select a bulk action.', 'hcaptcha-for-forms-and-more' ),
+				'noItems'   => __( 'Please select at least one item to perform this action on.', 'hcaptcha-for-forms-and-more' ),
+				'DoingBulk' => __( 'Doing bulk action...', 'hcaptcha-for-forms-and-more' ),
 				'delimiter' => self::TIMESPAN_DELIMITER,
 				'locale'    => $this->get_language_code(),
 			]
@@ -221,12 +257,12 @@ abstract class ListPageBase extends PluginSettingsBase {
 					<div class="hcaptcha-datepicker-calendar">
 						<label for="hcaptcha-datepicker">
 							<input
-								type="text"
-								name="date"
-								tabindex="-1"
-								aria-hidden="true"
-								id="hcaptcha-datepicker"
-								value="<?php echo esc_attr( $value ); ?>">
+									type="text"
+									name="date"
+									tabindex="-1"
+									aria-hidden="true"
+									id="hcaptcha-datepicker"
+									value="<?php echo esc_attr( $value ); ?>">
 						</label>
 					</div>
 					<div class="hcaptcha-datepicker-action">
@@ -244,11 +280,75 @@ abstract class ListPageBase extends PluginSettingsBase {
 	}
 
 	/**
+	 * Ajax callback for bulk actions.
+	 *
+	 * @return void
+	 */
+	public function bulk_action(): void {
+		$this->run_checks( static::BULK_ACTION );
+
+		// Nonce is checked by check_ajax_referer() in run_checks().
+		// phpcs:disable WordPress.Security.NonceVerification.Missing
+		$bulk = isset( $_POST['bulk'] ) ? sanitize_text_field( wp_unslash( $_POST['bulk'] ) ) : '';
+		$ids  = isset( $_POST['ids'] )
+			? (array) json_decode( sanitize_text_field( wp_unslash( $_POST['ids'] ) ), true )
+			: [];
+		$date = isset( $_POST['date'] )
+			// We need filter_input here to keep the delimiter intact.
+			? sanitize_text_field( wp_unslash( $_POST['date'] ) )
+			: '';
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
+
+		$dates = explode( self::TIMESPAN_DELIMITER, $date );
+		$dates = array_filter( array_map( 'trim', $dates ) );
+
+		if ( 'trash' === $bulk ) {
+			$args = [
+				'ids'   => $ids,
+				'dates' => $dates,
+			];
+
+			if ( ! $this->delete_events( $args ) ) {
+				wp_send_json_error( __( 'Failed to delete the selected items.', 'hcaptcha-for-forms-and-more' ) );
+
+				return; // For testing purposes.
+			}
+
+			set_transient(
+				self::TRANSIENT,
+				__( 'Selected items have been successfully deleted.', 'hcaptcha-for-forms-and-more' )
+			);
+
+			wp_send_json_success();
+
+			return; // For testing purposes.
+		}
+
+		wp_send_json_error( __( 'Invalid bulk action.', 'hcaptcha-for-forms-and-more' ) );
+	}
+
+	/**
+	 * Get and clean the transient.
+	 *
+	 * @return string
+	 */
+	protected function get_clean_transient(): string {
+		$bulk_message = (string) get_transient( self::TRANSIENT );
+
+		if ( $bulk_message ) {
+			delete_transient( self::TRANSIENT );
+		}
+
+		return $bulk_message;
+	}
+
+	/**
 	 * Sets the timespan (or date range) for performing mysql queries.
 	 *
 	 * Includes:
 	 * 1. A list of date filter options for the datepicker module.
-	 * 2. Currently selected filter or date range values. Last "X" days, or i.e. Feb 8, 2023 - Mar 9, 2023.
+	 * 2. Currently selected filter or date range values.
+	 *    Last "X" days, or i.e., Feb 8, 2023 - Mar 9, 2023.
 	 * 3. Assigned timespan dates.
 	 *
 	 * @param array|null $timespan Given timespan (dates) preferably in WP timezone.
@@ -302,7 +402,7 @@ abstract class ListPageBase extends PluginSettingsBase {
 	protected function process_timespan(): array {
 		$dates = (string) filter_input( INPUT_GET, 'date', FILTER_SANITIZE_FULL_SPECIAL_CHARS );
 
-		// Return default timespan if dates are empty.
+		// Return the default timespan if dates are empty.
 		if ( empty( $dates ) ) {
 			return $this->get_timespan_dates( self::DEFAULT_TIMESPAN_DAYS );
 		}
@@ -311,7 +411,7 @@ abstract class ListPageBase extends PluginSettingsBase {
 
 		[ $start_date, $end_date ] = explode( self::TIMESPAN_DELIMITER, $dates );
 
-		// Return default timespan if the start date is more recent than the end date.
+		// Return the default timespan if the start date is more recent than the end date.
 		if ( strtotime( $start_date ) > strtotime( $end_date ) ) {
 			return $this->get_timespan_dates( self::DEFAULT_TIMESPAN_DAYS );
 		}
@@ -327,14 +427,14 @@ abstract class ListPageBase extends PluginSettingsBase {
 			// @codeCoverageIgnoreEnd
 		}
 
-		// Set time to 0:0:0 for start date and 23:59:59 for end date.
+		// Set time to 0:0:0 for the start date and 23:59:59 for the end date.
 		$start_date = $start_date->setTime( 0, 0 );
 		$end_date   = $end_date->setTime( 23, 59, 59 );
 
 		$days_diff    = '';
 		$current_date = date_create_immutable( 'now', $timezone )->setTime( 23, 59, 59 );
 
-		// Calculate day difference only if the end date is equal to the current date.
+		// Calculate the day difference only if the end date is equal to the current date.
 		if ( ! $current_date->diff( $end_date )->format( '%a' ) ) {
 			$days_diff = $end_date->diff( $start_date )->format( '%a' );
 		}
@@ -376,7 +476,7 @@ abstract class ListPageBase extends PluginSettingsBase {
 	protected function get_timespan_dates( string $days ): array {
 		[ $timespan_key, $timespan_label ] = $this->get_date_filter_choices( $days );
 
-		// Bail early, if the given number of days is NOT a number nor a numeric string.
+		// Bail early if the given number of days is NOT a number nor a numeric string.
 		if ( ! is_numeric( $days ) ) {
 			return [ '', '', $timespan_key, $timespan_label ];
 		}
@@ -385,7 +485,13 @@ abstract class ListPageBase extends PluginSettingsBase {
 		$start_date = $end_date;
 
 		if ( (int) $days > 0 ) {
-			$start_date = $start_date->modify( "-$days day" );
+			try {
+				$start_date = $start_date->modify( "-$days day" );
+			} catch ( Exception $e ) {
+				// @codeCoverageIgnoreStart
+				$start_date = $end_date;
+				// @codeCoverageIgnoreEnd
+			}
 		}
 
 		$start_date = $start_date->setTime( 0, 0 );
@@ -395,7 +501,7 @@ abstract class ListPageBase extends PluginSettingsBase {
 			$start_date,     // WP timezone.
 			$end_date,       // WP timezone.
 			$timespan_key,   // i.e. 30.
-			$timespan_label, // i.e. Last 30 days.
+			$timespan_label, // i.e., Last 30 days.
 		];
 	}
 
@@ -410,16 +516,16 @@ abstract class ListPageBase extends PluginSettingsBase {
 	protected function get_date_filter_choices( $key = null ): array {
 		// Available date filters.
 		$choices = [
-			'0'      => esc_html__( 'Today', 'wpforms-lite' ),
-			'1'      => esc_html__( 'Yesterday', 'wpforms-lite' ),
-			'7'      => esc_html__( 'Last 7 days', 'wpforms-lite' ),
-			'30'     => esc_html__( 'Last 30 days', 'wpforms-lite' ),
-			'90'     => esc_html__( 'Last 90 days', 'wpforms-lite' ),
-			'365'    => esc_html__( 'Last 1 year', 'wpforms-lite' ),
-			'custom' => esc_html__( 'Custom', 'wpforms-lite' ),
+			'0'      => esc_html__( 'Today', 'hcaptcha-for-forms-and-more' ),
+			'1'      => esc_html__( 'Yesterday', 'hcaptcha-for-forms-and-more' ),
+			'7'      => esc_html__( 'Last 7 days', 'hcaptcha-for-forms-and-more' ),
+			'30'     => esc_html__( 'Last 30 days', 'hcaptcha-for-forms-and-more' ),
+			'90'     => esc_html__( 'Last 90 days', 'hcaptcha-for-forms-and-more' ),
+			'365'    => esc_html__( 'Last 1 year', 'hcaptcha-for-forms-and-more' ),
+			'custom' => esc_html__( 'Custom', 'hcaptcha-for-forms-and-more' ),
 		];
 
-		// Bail early, and return the full list of options.
+		// Bail early and return the full list of options.
 		if ( is_null( $key ) ) {
 			return $choices;
 		}
@@ -431,7 +537,8 @@ abstract class ListPageBase extends PluginSettingsBase {
 	}
 
 	/**
-	 * Concatenate given dates into a single string. i.e. "2024-04-16 - 2024-05-16".
+	 * Concatenate given dates into a single string.
+	 * Should be like that: "2024-04-16 - 2024-05-16".
 	 *
 	 * @param DateTimeImmutable|mixed $start_date Start date.
 	 * @param DateTimeImmutable|mixed $end_date   End date.
@@ -440,7 +547,7 @@ abstract class ListPageBase extends PluginSettingsBase {
 	 * @return string
 	 */
 	private function concat_dates( $start_date, $end_date, $fallback = '' ) {
-		// Bail early, if the given dates are not valid.
+		// Bail early if the given dates are not valid.
 		if ( ! ( $start_date instanceof DateTimeImmutable ) || ! ( $end_date instanceof DateTimeImmutable ) ) {
 			return $fallback;
 		}
@@ -455,7 +562,7 @@ abstract class ListPageBase extends PluginSettingsBase {
 	}
 
 	/**
-	 * Get the ISO 639-2 Language Code from user/site locale.
+	 * Get the ISO 639-2 Language Code from the user / site locale.
 	 *
 	 * @see   http://www.loc.gov/standards/iso639-2/php/code_list.php
 	 *

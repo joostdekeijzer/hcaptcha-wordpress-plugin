@@ -3,20 +3,21 @@
 # Directories
 /.codeception
 /.git
+/.githooks
 /.github
 /.idea
 /.php-scoper
-/.tests
 /.wordpress-org
 /.yarn
-/bin
 /node_modules
 /src/js
+/tests
+/trunk
 
 # Files
 /.DS_Store
 /.babelrc
-/.codeception.yml
+/codeception.yml
 /.distignore
 /.editorconfig
 /.eslintrc.json
@@ -24,14 +25,14 @@
 /.gitignore
 /.phpcs.cache
 /.yarnrc.yml
+/MAINTAINERS.md
 /README.md
+/SECURITY.md
 /Thumbs.db
 /auth.json
 /babel.config.json
-/composer.json
 /composer.lock
 /package.json
-/MAINTAINERS.md
 /phpcs.xml
 /webpack.config.js
 /yarn.lock

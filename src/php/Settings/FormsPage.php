@@ -7,6 +7,7 @@
 
 namespace HCaptcha\Settings;
 
+use HCaptcha\Admin\Events\Events;
 use HCaptcha\Admin\Events\FormsTable;
 use KAGG\Settings\Abstracts\SettingsBase;
 
@@ -26,6 +27,11 @@ class FormsPage extends ListPageBase {
 	 * Script localization object.
 	 */
 	public const OBJECT = 'HCaptchaFormsObject';
+
+	/**
+	 * Bulk ajax action.
+	 */
+	public const BULK_ACTION = 'hcaptcha-forms-bulk';
 
 	/**
 	 * ListTable instance.
@@ -66,16 +72,6 @@ class FormsPage extends ListPageBase {
 	 */
 	public function tab_name(): string {
 		return 'Forms';
-	}
-
-	/**
-	 * Init class hooks.
-	 */
-	protected function init_hooks(): void {
-		parent::init_hooks();
-
-		add_action( 'admin_init', [ $this, 'admin_init' ] );
-		add_action( 'kagg_settings_header', [ $this, 'date_picker_display' ] );
 	}
 
 	/**
@@ -126,6 +122,10 @@ class FormsPage extends ListPageBase {
 			self::HANDLE,
 			self::OBJECT,
 			[
+				'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
+				'bulkAction'  => self::BULK_ACTION,
+				'bulkNonce'   => wp_create_nonce( self::BULK_ACTION ),
+				'bulkMessage' => $this->get_clean_transient(),
 				'served'      => $this->served,
 				'servedLabel' => __( 'Served', 'hcaptcha-for-forms-and-more' ),
 				'unit'        => $this->unit,
@@ -143,6 +143,10 @@ class FormsPage extends ListPageBase {
 	 */
 	public function section_callback( array $arguments ): void {
 		$this->print_header();
+
+		?>
+		<div id="hcaptcha-message"></div>
+		<?php
 
 		if ( ! $this->allowed ) {
 			$statistics_url = admin_url( 'options-general.php?page=hcaptcha&tab=general#statistics_1' );
@@ -177,6 +181,17 @@ class FormsPage extends ListPageBase {
 					<?php esc_html_e( 'Your browser does not support the canvas element.', 'hcaptcha-for-forms-and-more' ); ?>
 				</p>
 			</canvas>
+				<?php
+				if ( count( $this->list_table->served ) >= Events::SERVED_LIMIT ) {
+					echo '<div id="hcaptcha-chart-message">';
+					printf(
+					/* translators: 1: Number of elements. */
+						esc_html__( 'The chart is limited to displaying a maximum of %1$s elements.', 'hcaptcha-for-forms-and-more' ),
+						esc_html( number_format_i18n( Events::SERVED_LIMIT ) )
+					);
+					echo '</div>';
+				}
+				?>
 		</div>
 		<div id="hcaptcha-forms-wrap">
 			<?php
@@ -210,5 +225,50 @@ class FormsPage extends ListPageBase {
 
 			++$this->served[ $date ];
 		}
+	}
+
+	/**
+	 * Delete hCaptcha events by forms.
+	 *
+	 * @param array $args Arguments.
+	 *
+	 * @return bool
+	 */
+	protected function delete_events( array $args ): bool {
+		global $wpdb;
+
+		$ids   = $args['ids'] ?? [];
+		$dates = $args['dates'] ?? [];
+		$dates = $dates ?: Events::get_default_dates();
+		$dates = Events::prepare_gmt_dates( $dates );
+
+		$table_name = $wpdb->prefix . Events::TABLE_NAME;
+		$conditions = [];
+		$values     = [];
+
+		if ( ! $ids ) {
+			return false;
+		}
+
+		foreach ( $ids as $item ) {
+			$conditions[] = '(source = %s AND form_id = %s)';
+			$values[]     = $item['source'];
+			$values[]     = $item['formId'];
+		}
+
+		$where_clause = implode( ' OR ', $conditions );
+		$where_clause = "($where_clause) AND date_gmt BETWEEN %s AND %s";
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$result = $wpdb->query(
+			$wpdb->prepare(
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
+				"DELETE FROM $table_name WHERE $where_clause",
+				...$values,
+				...$dates
+			)
+		);
+
+		return (bool) $result;
 	}
 }

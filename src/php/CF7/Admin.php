@@ -10,7 +10,10 @@
 
 namespace HCaptcha\CF7;
 
+use HCaptcha\Helpers\Pages;
+use WPCF7_ContactForm;
 use WPCF7_TagGenerator;
+use WPCF7_TagGeneratorGenerator;
 
 /**
  * Class Admin.
@@ -19,9 +22,24 @@ use WPCF7_TagGenerator;
  */
 class Admin extends Base {
 	/**
+	 * Script handle.
+	 */
+	public const HANDLE = 'hcaptcha-cf7';
+
+	/**
 	 * Admin script handle.
 	 */
 	public const ADMIN_HANDLE = 'admin-cf7';
+
+	/**
+	 * Script localization object.
+	 */
+	public const OBJECT = 'HCaptchaCF7Object';
+
+	/**
+	 * Update form action.
+	 */
+	public const UPDATE_FORM_ACTION = 'hcaptcha-cf7-update-form';
 
 	/**
 	 * Init hooks.
@@ -31,13 +49,42 @@ class Admin extends Base {
 	public function init_hooks(): void {
 		parent::init_hooks();
 
-		if ( ( ! $this->mode_auto && ! $this->mode_embed ) || ! is_admin() ) {
+		if ( $this->mode_live ) {
+			add_action( 'wp_ajax_' . self::UPDATE_FORM_ACTION, [ $this, 'update_form' ] );
+		}
+
+		if ( ! Pages::is_cf7_edit_page() ) {
 			return;
 		}
 
-		add_action( 'wpcf7_admin_init', [ $this, 'add_tag_generator_hcaptcha' ], 54 );
-		add_action( 'toplevel_page_wpcf7', [ $this, 'before_toplevel_page_wpcf7' ], 0 );
-		add_action( 'toplevel_page_wpcf7', [ $this, 'after_toplevel_page_wpcf7' ], 20 );
+		if ( $this->mode_embed ) {
+			add_action( 'wpcf7_admin_init', [ $this, 'add_tag_generator_hcaptcha' ], 54 );
+		}
+
+		if ( $this->mode_live ) {
+			add_action( 'current_screen', [ $this, 'current_screen' ] );
+		}
+
+		add_filter( 'hcap_print_hcaptcha_scripts', '__return_true', 0 );
+	}
+
+	/**
+	 * Current screen.
+	 *
+	 * @param WP_Screen|mixed $current_screen Current screen.
+	 *
+	 * @return void
+	 */
+	public function current_screen( $current_screen ): void {
+		$current_screen_id = $current_screen->id ?? '';
+
+		if ( ! $current_screen_id ) {
+			return;
+		}
+
+		add_action( $current_screen_id, [ $this, 'before_toplevel_page_wpcf7' ], 0 );
+		add_action( $current_screen_id, [ $this, 'after_toplevel_page_wpcf7' ], 20 );
+
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin_scripts_before_cf7' ], 0 );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin_scripts_after_cf7' ], 20 );
 	}
@@ -62,46 +109,70 @@ class Admin extends Base {
 	}
 
 	/**
-	 * Insert live form into CF7 editor.
+	 * Insert live form into the CF7 editor.
 	 *
 	 * @param string $output CF7 editor output.
 	 *
 	 * @return string
 	 */
 	private function insert_live_form( string $output ): string {
-		if ( ! preg_match( '/(<form .+)<div id="poststuff">/s', $output, $m ) ) {
-			return $output;
-		}
-
-		$form_start = $m[1];
-
 		if ( ! preg_match( '/<input type="text" id="wpcf7-shortcode" .+ value="(.+)"/', $output, $m ) ) {
 			return $output;
 		}
 
 		$form_shortcode = htmlspecialchars_decode( $m[1] );
 
+		if ( ! preg_match( '~(<form method="post".+?)<div id="poststuff">.+?(</form>)~s', $output, $m ) ) {
+			return $output;
+		}
+
+		[ $form, $form_start, $form_end ] = $m;
+
+		if ( ! preg_match( '~<div id="post-body".+?>~s', $output, $m ) ) {
+			return $output;
+		}
+
+		$post_body_start = $m[0];
+
+		if ( ! preg_match( '~(</div>(?:<!-- #post-body -->)*\s*<br class="clear" />\s*</div>.*?)</form>~s', $output, $m ) ) {
+			return $output;
+		}
+
+		$post_body_end = $m[1];
+
+		$live_form      = do_shortcode( $form_shortcode );
+		$stripe_message = '';
+
+		if ( $this->has_stripe_element( $live_form ) ) {
+			$stripe_message =
+				'<h4><em>' .
+				__( 'The Stripe payment element already contains an invisible hCaptcha. No need to add it to the form.', 'hcaptcha-for-forms-and-more' ) .
+				'</em></h4>';
+		}
+
 		$live_container =
 			"\n" .
 			'<div id="postbox-container-live" class="postbox-container">' .
 			'<div id="form-live">' .
-			'<h3>Live Form</h3>' .
-			do_shortcode( $form_shortcode ) .
+			'<h3>' . __( 'Live Form', 'hcaptcha-for-forms-and-more' ) . '</h3>' .
+			$stripe_message .
+			$live_form .
 			'</div>' .
 			'</div>' .
 			"\n";
 
-		// Remove form tag.
-		$output = str_replace( [ $form_start, '</form>' ], '', $output );
+		$post_body_end_with_live = str_replace( '<br class="clear" />', $live_container . '<br class="clear" />', $post_body_end );
 
-		// Insert form start at the beginning of the id="post-body".
-		$search = '<div id="post-body-content">';
-		$output = str_replace( $search, $form_start . $search, $output );
+		// Extract form content.
+		$form_content = str_replace( [ $form_start, $form_end ], '', $form );
 
-		// Insert form end and live container at the end of the id="post-body".
-		$search = '/(<\/div>\s*<!-- #post-body -->)/';
-
-		return preg_replace( $search, '</form>$1' . $live_container, $output );
+		// Leave form content only.
+		// Add form inside div#post-body.
+		return str_replace(
+			[ $form, $post_body_start, $post_body_end ],
+			[ $form_content, $post_body_start . $form_start, $form_end . $post_body_end_with_live ],
+			$output
+		);
 	}
 
 	/**
@@ -119,7 +190,8 @@ class Admin extends Base {
 		$tag_generator->add(
 			'cf7-hcaptcha',
 			__( 'hCaptcha', 'hcaptcha-for-forms-and-more' ),
-			[ $this, 'tag_generator_hcaptcha' ]
+			[ $this, 'tag_generator_hcaptcha' ],
+			[ 'version' => '2' ]
 		);
 	}
 
@@ -127,68 +199,48 @@ class Admin extends Base {
 	 * Show tag generator.
 	 *
 	 * @param mixed        $contact_form Contact form.
-	 * @param array|string $args         Arguments.
+	 * @param array|string $options      Options.
 	 *
 	 * @return void
 	 * @noinspection PhpUnusedParameterInspection
 	 */
-	public function tag_generator_hcaptcha( $contact_form, $args = '' ): void {
-		$args        = wp_parse_args( $args );
-		$type        = $args['id'];
-		$description = __( 'Generate a form-tag for a hCaptcha field.', 'hcaptcha-for-forms-and-more' );
+	public function tag_generator_hcaptcha( $contact_form, $options = '' ): void {
+		$field = [
+			'display_name' => __( 'hCaptcha field', 'hcaptcha-for-forms-and-more' ),
+			'heading'      => __( 'hCaptcha field form-tag generator', 'hcaptcha-for-forms-and-more' ),
+			'description'  => __( 'Generate a form-tag for a hCaptcha field.', 'hcaptcha-for-forms-and-more' ),
+		];
+
+		$tgg = new WPCF7_TagGeneratorGenerator( $options['content'] );
 
 		?>
+		<header class="description-box">
+			<h3><?php echo esc_html( $field['heading'] ); ?></h3>
+			<p><?php echo esc_html( $field['description'] ); ?></p>
+		</header>
+
 		<div class="control-box">
-			<fieldset>
-				<legend><?php echo esc_html( $description ); ?></legend>
-
-				<table class="form-table">
-					<tbody>
-
-					<tr>
-						<th scope="row">
-							<label for="<?php echo esc_attr( $args['content'] . '-id' ); ?>">
-								<?php echo esc_html( __( 'Id attribute', 'hcaptcha-for-forms-and-more' ) ); ?>
-							</label>
-						</th>
-						<td>
-							<input
-									type="text" name="id" class="idvalue oneline option"
-									id="<?php echo esc_attr( $args['content'] . '-id' ); ?>"/>
-						</td>
-					</tr>
-
-					<tr>
-						<th scope="row">
-							<label for="<?php echo esc_attr( $args['content'] . '-class' ); ?>">
-								<?php echo esc_html( __( 'Class attribute', 'hcaptcha-for-forms-and-more' ) ); ?>
-							</label>
-						</th>
-						<td>
-							<input
-									type="text" name="class" class="classvalue oneline option"
-									id="<?php echo esc_attr( $args['content'] . '-class' ); ?>"/>
-						</td>
-					</tr>
-
-					</tbody>
-				</table>
-			</fieldset>
+			<?php
+			$tgg->print(
+				'field_type',
+				[
+					'with_required'  => true,
+					'select_options' => [
+						'cf7-hcaptcha' => $field['display_name'],
+					],
+				]
+			);
+			$tgg->print( 'field_name' );
+			$tgg->print( 'class_attr' );
+			?>
 		</div>
 
-		<div class="insert-box">
-			<label>
-				<input
-						type="text" name="<?php echo esc_attr( $type ); ?>" class="tag code" readonly="readonly"
-						onfocus="this.select()"/>
-			</label>
-
-			<div class="submitbox">
-				<input
-						type="button" class="button button-primary insert-tag"
-						value="<?php echo esc_attr( __( 'Insert Tag', 'hcaptcha-for-forms-and-more' ) ); ?>"/>
-			</div>
-		</div>
+		<footer class="insert-box">
+			<?php
+			$tgg->print( 'insert_box_content' );
+			$tgg->print( 'mail_tag_tip' );
+			?>
+		</footer>
 		<?php
 	}
 
@@ -199,6 +251,7 @@ class Admin extends Base {
 	 * @noinspection PhpUndefinedFunctionInspection
 	 */
 	public function enqueue_admin_scripts_before_cf7(): void {
+		// CF7 scripts.
 		wp_enqueue_style(
 			'contact-form-7',
 			wpcf7_plugin_url( 'includes/css/styles.css' ),
@@ -222,13 +275,41 @@ class Admin extends Base {
 			[ 'in_footer' => true ]
 		);
 
+		// The hCaptcha admin script and style.
 		$min = hcap_min_suffix();
+
+		wp_enqueue_script(
+			self::ADMIN_HANDLE,
+			HCAPTCHA_URL . "/assets/js/admin-cf7$min.js",
+			[ 'jquery' ],
+			HCAPTCHA_VERSION,
+			true
+		);
+
+		wp_localize_script(
+			self::ADMIN_HANDLE,
+			self::OBJECT,
+			[
+				'ajaxUrl'          => admin_url( 'admin-ajax.php' ),
+				'updateFormAction' => self::UPDATE_FORM_ACTION,
+				'updateFormNonce'  => wp_create_nonce( self::UPDATE_FORM_ACTION ),
+			]
+		);
 
 		wp_enqueue_style(
 			self::ADMIN_HANDLE,
 			HCAPTCHA_URL . "/assets/css/admin-cf7$min.css",
 			[],
 			HCAPTCHA_VERSION
+		);
+
+		// The hCaptcha frontend script.
+		wp_enqueue_script(
+			self::HANDLE,
+			HCAPTCHA_URL . "/assets/js/hcaptcha-cf7$min.js",
+			[],
+			HCAPTCHA_VERSION,
+			true
 		);
 	}
 
@@ -240,6 +321,7 @@ class Admin extends Base {
 	public function enqueue_admin_scripts_after_cf7(): void {
 		global $wp_scripts;
 
+		// CF7 scripts.
 		$wpcf7 = [
 			'api' => [
 				'root'      => sanitize_url( get_rest_url() ),
@@ -247,12 +329,59 @@ class Admin extends Base {
 			],
 		];
 
-		$data = $wp_scripts->registered['wpcf7-admin']->extra['data'];
+		$data = $wp_scripts->registered['wpcf7-admin']->extra['before'][1];
 
-		if ( preg_match( '/var wpcf7 = ({.+});/', $data, $m ) ) {
+		if ( preg_match( '/var wpcf7 = ({.+});/s', $data, $m ) ) {
 			$wpcf7 = array_merge( $wpcf7, json_decode( $m[1], true ) );
 
-			$wp_scripts->registered['wpcf7-admin']->extra['data'] = 'var wpcf7 = ' . wp_json_encode( $wpcf7 ) . ';';
+			$wp_scripts->registered['wpcf7-admin']->extra['before'][1] = 'var wpcf7 = ' . wp_json_encode( $wpcf7 ) . ';';
 		}
+	}
+
+	/**
+	 * Update form.
+	 *
+	 * @return void
+	 * @noinspection PhpUndefinedFunctionInspection
+	 * @noinspection PhpUnusedParameterInspection
+	 */
+	public function update_form(): void {
+		if ( ! check_ajax_referer( self::UPDATE_FORM_ACTION, 'nonce', false ) ) {
+			wp_send_json_error( esc_html__( 'Your session has expired. Please reload the page.', 'hcaptcha-for-forms-and-more' ) );
+
+			return; // For testing purposes.
+		}
+
+		if ( ! current_user_can( 'edit_posts' ) ) {
+			wp_send_json_error( esc_html__( 'You do not have permission to update the form.', 'hcaptcha-for-forms-and-more' ) );
+
+			return; // For testing purposes.
+		}
+
+		$shortcode = html_entity_decode( filter_input( INPUT_POST, 'shortcode', FILTER_SANITIZE_FULL_SPECIAL_CHARS ) );
+		$form      = html_entity_decode( filter_input( INPUT_POST, 'form', FILTER_SANITIZE_FULL_SPECIAL_CHARS ) );
+
+		add_action(
+			'wpcf7_contact_form',
+			static function ( $contact_form ) use ( $form ) {
+				/**
+				 * Contact Form instance.
+				 *
+				 * @var WPCF7_ContactForm $contact_form
+				 */
+				$properties         = $contact_form->get_properties();
+				$properties['form'] = $form;
+
+				$contact_form->set_properties( $properties );
+
+				return $form;
+			}
+		);
+
+		$live =
+			'<h3>' . __( 'Live Form', 'hcaptcha-for-forms-and-more' ) . '</h3>' .
+			do_shortcode( $shortcode );
+
+		wp_send_json_success( $live );
 	}
 }

@@ -1,6 +1,6 @@
 <?php
 /**
- * Form class file.
+ * 'Form' class file.
  *
  * @package hcaptcha-wp
  */
@@ -12,6 +12,7 @@ namespace HCaptcha\GravityForms;
 
 use GFFormsModel;
 use GP_Field_Nested_Form;
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 
 /**
@@ -45,6 +46,13 @@ class Form extends Base {
 	private $mode_embed = false;
 
 	/**
+	 * Current form id.
+	 *
+	 * @var int
+	 */
+	protected $form_id = 0;
+
+	/**
 	 * Constructor.
 	 */
 	public function __construct() {
@@ -61,8 +69,11 @@ class Form extends Base {
 		$this->mode_embed = hcaptcha()->settings()->is( 'gravity_status', 'embed' );
 
 		if ( $this->mode_auto ) {
-			add_filter( 'gform_submit_button', [ $this, 'add_captcha' ], 10, 2 );
+			add_filter( 'gform_submit_button', [ $this, 'add_hcaptcha' ], 20, 2 );
 		}
+
+		add_filter( 'gform_form_after_open', [ $this, 'gform_open' ], 10, 2 );
+		add_filter( 'gform_get_form_filter', [ $this, 'gform_close' ], 10, 2 );
 
 		add_filter( 'gform_validation', [ $this, 'verify' ], 10, 2 );
 		add_filter( 'gform_form_validation_errors', [ $this, 'form_validation_errors' ], 10, 2 );
@@ -79,27 +90,75 @@ class Form extends Base {
 	 *
 	 * @noinspection PhpUnusedParameterInspection
 	 */
-	public function add_captcha( $button_input, array $form ): string {
+	public function add_hcaptcha( $button_input, array $form ): string {
 		if ( is_admin() ) {
 			return $button_input;
 		}
 
 		$form_id = $form['id'] ?? 0;
 
-		if ( $this->mode_embed && $this->has_hcaptcha( $form_id ) ) {
+		if ( $this->has_hcaptcha( $form_id ) ) {
 			return $button_input;
 		}
 
-		$args = [
-			'action' => self::ACTION,
-			'name'   => self::NONCE,
-			'id'     => [
-				'source'  => HCaptcha::get_class_source( __CLASS__ ),
-				'form_id' => $form_id,
-			],
-		];
+		return HCaptcha::form() . $button_input;
+	}
 
-		return HCaptcha::form( $args ) . $button_input;
+	/**
+	 * Add hCaptcha args filter on opening the form.
+	 *
+	 * @param string|mixed $markup The current string to append.
+	 * @param array        $form   The form being displayed.
+	 *
+	 * @return string
+	 */
+	public function gform_open( $markup, array $form ): string {
+		$this->form_id = (int) ( $form['id'] ?? 0 );
+
+		add_filter( 'hcap_form_args', [ $this, 'hcap_form_args' ] );
+
+		return (string) $markup;
+	}
+
+	/**
+	 * Remove hCaptcha args filter on closing the form.
+	 *
+	 * @param string|mixed $form_string The current form string.
+	 * @param array        $form        The form being displayed.
+	 *
+	 * @return string
+	 * @noinspection PhpMissingParamTypeInspection
+	 * @noinspection PhpUnusedParameterInspection
+	 */
+	public function gform_close( $form_string, $form ): string {
+		$this->form_id = 0;
+
+		remove_filter( 'hcap_form_args', [ $this, 'hcap_form_args' ] );
+
+		return (string) $form_string;
+	}
+
+	/**
+	 * Filter hCaptcha from args on form.
+	 *
+	 * @param array|mixed $args Form arguments.
+	 *
+	 * @return array
+	 */
+	public function hcap_form_args( $args ): array {
+		$args = (array) $args;
+
+		return array_merge(
+			$args,
+			[
+				'action' => self::ACTION,
+				'name'   => self::NONCE,
+				'id'     => [
+					'source'  => HCaptcha::get_class_source( __CLASS__ ),
+					'form_id' => $this->form_id,
+				],
+			]
+		);
 	}
 
 	/**
@@ -123,10 +182,7 @@ class Form extends Base {
 			return $validation_result;
 		}
 
-		$this->error_message = hcaptcha_verify_post(
-			self::NONCE,
-			self::ACTION
-		);
+		$this->error_message = API::verify_post( self::NONCE, self::ACTION );
 
 		if ( null === $this->error_message ) {
 			return $validation_result;
@@ -193,7 +249,8 @@ class Form extends Base {
 	 * @noinspection CssUnusedSymbol
 	 */
 	public function print_inline_styles(): void {
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	.gform_previous_button + .h-captcha {
 		margin-top: 2rem;
 	}
@@ -226,7 +283,7 @@ class Form extends Base {
 	.gform_wrapper.gravity-theme .h-captcha ~ input[type="submit"] {
 		margin: 1em 0 0 0 !important;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}
@@ -258,8 +315,7 @@ CSS;
 	 * @return bool
 	 */
 	private function should_verify(): bool {
-		// Nonce is checked in the hcaptcha_verify_post().
-
+		// Nonce is checked in the \HCaptcha\Helpers\API::verify_post().
 		// phpcs:disable WordPress.Security.NonceVerification.Missing
 		if ( ! isset( $_POST['gform_submit'] ) ) {
 			// We are not in the Gravity Form submit process.
@@ -270,6 +326,7 @@ CSS;
 
 		// Nested form.
 		$parent_form_id = isset( $_POST['gpnf_parent_form_id'] ) ? (int) $_POST['gpnf_parent_form_id'] : 0;
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
 
 		if ( $parent_form_id ) {
 			$fields = (array) GFFormsModel::get_form_meta( $parent_form_id )['fields'];
@@ -284,43 +341,50 @@ CSS;
 			}
 		}
 
-		// Multipage form.
-		$target_page_name = "gform_target_page_number_$form_id";
-
-		if ( isset( $_POST[ $target_page_name ] ) ) {
-			$source_page_name = "gform_source_page_number_$form_id";
-
-			$target_page = (int) $_POST[ $target_page_name ];
-			$source_page = isset( $_POST[ $source_page_name ] ) ? (int) $_POST[ $source_page_name ] : 0;
-
-			$form_meta = (array) GFFormsModel::get_form_meta( $form_id );
-
-			if (
-				0 !== (int) $_POST[ $target_page_name ] &&
-				$target_page !== $source_page &&
-				isset(
-					$form_meta['pagination']['pages'][ $target_page - 1 ],
-					$form_meta['pagination']['pages'][ $source_page - 1 ]
-				)
-			) {
-
-				// Do not verify hCaptcha and return success when switching between form pages.
-				return false;
-			}
+		if ( ! $this->should_verify_multipage( $form_id ) ) {
+			return false;
 		}
-		// phpcs:enable WordPress.Security.NonceVerification.Missing
 
 		if ( $this->mode_auto ) {
 			// In auto mode, verify all forms.
 			return true;
 		}
 
-		if ( $this->mode_embed && $this->has_hcaptcha( $form_id ) ) {
-			// In embed mode, verify only a form having hCaptcha field.
+		if ( $this->has_hcaptcha( $form_id ) ) {
+			// Verify only a form having hCaptcha field.
 			return true;
 		}
 
 		return false;
+	}
+
+	/**
+	 * Should verify hCaptcha for multipage form.
+	 *
+	 * @param int $form_id Form ID.
+	 *
+	 * @return bool
+	 */
+	private function should_verify_multipage( int $form_id ): bool {
+		$target_page_name = "gform_target_page_number_$form_id";
+		$source_page_name = "gform_source_page_number_$form_id";
+
+		// Nonce is checked in the \HCaptcha\Helpers\API::verify_post().
+		// phpcs:disable WordPress.Security.NonceVerification.Missing
+
+		$target_page = isset( $_POST[ $target_page_name ] ) ? (int) $_POST[ $target_page_name ] : 0;
+		$source_page = isset( $_POST[ $source_page_name ] ) ? (int) $_POST[ $source_page_name ] : 0;
+		$form_meta   = (array) GFFormsModel::get_form_meta( $form_id );
+
+		// Return false and do not verify hCaptcha when switching between form pages.
+		return (
+			0 === $target_page ||
+			$target_page === $source_page ||
+			! isset(
+				$form_meta['pagination']['pages'][ $target_page - 1 ],
+				$form_meta['pagination']['pages'][ $source_page - 1 ]
+			)
+		);
 	}
 
 	/**
@@ -340,7 +404,13 @@ CSS;
 		$captcha_types = [ 'captcha', 'hcaptcha' ];
 
 		foreach ( $form['fields'] as $field ) {
-			if ( in_array( $field->type, $captcha_types, true ) ) {
+			$type    = $field->type ?? '';
+			$content = $field->content ?? '';
+
+			if (
+				( $this->mode_embed && in_array( $type, $captcha_types, true ) ) ||
+				has_shortcode( $content, 'hcaptcha' )
+			) {
 				return true;
 			}
 		}

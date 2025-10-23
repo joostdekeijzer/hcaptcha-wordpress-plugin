@@ -7,7 +7,9 @@
 
 namespace HCaptcha\Settings;
 
+use HCaptcha\Admin\Events\Events;
 use HCaptcha\Admin\Events\EventsTable;
+use HCaptcha\Helpers\DB;
 use KAGG\Settings\Abstracts\SettingsBase;
 
 /**
@@ -26,6 +28,11 @@ class EventsPage extends ListPageBase {
 	 * Script localization object.
 	 */
 	public const OBJECT = 'HCaptchaEventsObject';
+
+	/**
+	 * Bulk ajax action.
+	 */
+	public const BULK_ACTION = 'hcaptcha-events-bulk';
 
 	/**
 	 * ListTable instance.
@@ -73,16 +80,6 @@ class EventsPage extends ListPageBase {
 	 */
 	public function tab_name(): string {
 		return 'Events';
-	}
-
-	/**
-	 * Init class hooks.
-	 */
-	protected function init_hooks(): void {
-		parent::init_hooks();
-
-		add_action( 'admin_init', [ $this, 'admin_init' ] );
-		add_action( 'kagg_settings_header', [ $this, 'date_picker_display' ] );
 	}
 
 	/**
@@ -135,6 +132,10 @@ class EventsPage extends ListPageBase {
 			self::HANDLE,
 			self::OBJECT,
 			[
+				'ajaxUrl'      => admin_url( 'admin-ajax.php' ),
+				'bulkAction'   => self::BULK_ACTION,
+				'bulkNonce'    => wp_create_nonce( self::BULK_ACTION ),
+				'bulkMessage'  => $this->get_clean_transient(),
 				'succeed'      => $this->succeed,
 				'failed'       => $this->failed,
 				'succeedLabel' => __( 'Succeed', 'hcaptcha-for-forms-and-more' ),
@@ -154,6 +155,10 @@ class EventsPage extends ListPageBase {
 	 */
 	public function section_callback( array $arguments ): void {
 		$this->print_header();
+
+		?>
+		<div id="hcaptcha-message"></div>
+		<?php
 
 		if ( ! $this->allowed ) {
 			$statistics_url = admin_url( 'options-general.php?page=hcaptcha&tab=general#statistics_1' );
@@ -234,5 +239,31 @@ class EventsPage extends ListPageBase {
 				++$this->failed[ $date ];
 			}
 		}
+	}
+
+	/**
+	 * Delete hCaptcha events by IDs.
+	 *
+	 * @param array $args Arguments.
+	 *
+	 * @return bool
+	 */
+	protected function delete_events( array $args ): bool {
+		global $wpdb;
+
+		$ids = $args['ids'] ?? [];
+
+		$table_name = $wpdb->prefix . Events::TABLE_NAME;
+		$in         = DB::prepare_in( $ids, '%d' );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$result = $wpdb->query(
+			$wpdb->prepare(
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				"DELETE FROM $table_name WHERE id IN($in)"
+			)
+		);
+
+		return (bool) $result;
 	}
 }

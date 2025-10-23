@@ -7,6 +7,7 @@
 
 namespace HCaptcha\DownloadManager;
 
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 
 /**
@@ -71,7 +72,7 @@ class DownloadManager {
 		$hcaptcha = HCaptcha::form( $args );
 
 		$template = (string) preg_replace( '/(<ul class="list-group ml)/', $hcaptcha . '$1', $template );
-		$template = (string) preg_replace( '/<a (.+)?<\/a>/', '<button type="submit" $1</button>', $template );
+		$template = (string) preg_replace( '/<a (.+)?<\/a>/s', '<button type="submit" $1</button>', $template );
 		$template = str_replace( 'download-on-click', '', $template );
 		$url      = '';
 
@@ -94,7 +95,7 @@ class DownloadManager {
 	 */
 	public function verify( $package ): void {
 
-		$result = hcaptcha_verify_post( self::NONCE, self::ACTION );
+		$result = API::verify_post( self::NONCE, self::ACTION );
 
 		if ( null === $result ) {
 			return;
@@ -118,7 +119,8 @@ class DownloadManager {
 	 * @noinspection CssUnresolvedCustomProperty
 	 */
 	public function print_inline_styles(): void {
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	.wpdm-button-area + .h-captcha {
 		margin-bottom: 1rem;
 	}
@@ -127,7 +129,7 @@ class DownloadManager {
 		background-color: var(--color-primary) !important;
 		color: #fff !important;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}

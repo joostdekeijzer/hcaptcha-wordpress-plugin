@@ -1,12 +1,13 @@
 <?php
 /**
- * Subscribe class file.
+ * The 'Subscribe' class file.
  *
  * @package hcaptcha-wp
  */
 
 namespace HCaptcha\WPDiscuz;
 
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 
 /**
@@ -59,7 +60,7 @@ class Subscribe extends Base {
 			filter_var( wp_unslash( $_POST['h-captcha-response'] ), FILTER_SANITIZE_FULL_SPECIAL_CHARS ) :
 			'';
 
-		$result = hcaptcha_request_verify( $hcaptcha_response );
+		$result = API::verify_request( $hcaptcha_response );
 
 		unset( $_POST['h-captcha-response'], $_POST['g-recaptcha-response'] );
 		// phpcs:enable WordPress.Security.NonceVerification.Missing
@@ -78,12 +79,13 @@ class Subscribe extends Base {
 	 * @noinspection CssUnusedSymbol
 	 */
 	public function print_inline_styles(): void {
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	#wpdiscuz-subscribe-form .h-captcha {
 		margin-top: 5px;
 		margin-left: auto;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}

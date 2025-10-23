@@ -1,12 +1,13 @@
 <?php
 /**
- * Protect class file.
+ * The 'Protect' class file.
  *
  * @package hcaptcha-wp
  */
 
 namespace HCaptcha\Passster;
 
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 
 /**
@@ -55,7 +56,7 @@ class Protect {
 	 *
 	 * @param string|mixed $output Shortcode output.
 	 * @param string       $tag    Shortcode name.
-	 * @param array|string $attr   Shortcode attributes array or empty string.
+	 * @param array|string $attr   Shortcode attribute array or empty string.
 	 * @param array        $m      Regular expression match array.
 	 *
 	 * @return string|mixed
@@ -106,7 +107,7 @@ class Protect {
 	 * @noinspection PhpUnusedParameterInspection
 	 */
 	public function verify( string $input ): void {
-		$error_message = hcaptcha_verify_post( self::NONCE, self::ACTION );
+		$error_message = API::verify_post( self::NONCE, self::ACTION );
 
 		if ( null === $error_message ) {
 			return;
@@ -150,19 +151,11 @@ class Protect {
 	public function add_type_module( $tag, string $handle, string $src ): string {
 		$tag = (string) $tag;
 
-		if ( self::HANDLE !== $handle ) {
+		if ( static::HANDLE !== $handle ) {
 			return $tag;
 		}
 
-		$type = ' type="module"';
-
-		if ( false !== strpos( $tag, $type ) ) {
-			return $tag;
-		}
-
-		$search = ' src';
-
-		return str_replace( $search, $type . $search, $tag );
+		return HCaptcha::add_type_module( $tag );
 	}
 
 	/**
@@ -172,11 +165,12 @@ class Protect {
 	 * @noinspection CssUnusedSymbol
 	 */
 	public function print_inline_styles(): void {
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	.passster-form .h-captcha {
 		margin-bottom: 5px;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}

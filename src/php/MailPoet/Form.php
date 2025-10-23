@@ -1,6 +1,6 @@
 <?php
 /**
- * Form class file.
+ * 'Form' class file.
  *
  * @package hcaptcha-wp
  */
@@ -12,10 +12,11 @@
 
 namespace HCaptcha\MailPoet;
 
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
-use MailPoet\API\JSON\API;
+use HCaptcha\Helpers\Request;
+use MailPoet\API\JSON\API as MailPoetAPI;
 use MailPoet\API\JSON\Response;
-use WP_Block;
 
 /**
  * Class Form.
@@ -50,55 +51,72 @@ class Form {
 	 * @return void
 	 */
 	private function init_hooks(): void {
-		add_filter( 'render_block', [ $this, 'add_captcha' ], 10, 3 );
+		add_filter( 'the_content', [ $this, 'the_content_filter' ], 20 );
 		add_action( 'mailpoet_api_setup', [ $this, 'verify' ] );
 		add_action( 'wp_print_footer_scripts', [ $this, 'enqueue_scripts' ], 9 );
 	}
 
 	/**
-	 * Add hcaptcha to MailPoet form.
+	 * The content filter.
 	 *
-	 * @param string|mixed $block_content The block content.
-	 * @param array        $block         The full block, including name and attributes.
-	 * @param WP_Block     $instance      The block instance.
+	 * @param string|mixed $content Content.
 	 *
 	 * @return string
-	 * @noinspection PhpUnusedParameterInspection
 	 */
-	public function add_captcha( $block_content, array $block, WP_Block $instance ): string {
-		if ( 'mailpoet/subscription-form-block' !== $block['blockName'] ) {
-			return (string) $block_content;
+	public function the_content_filter( $content ): string {
+		$content = (string) $content;
+
+		if ( ! preg_match_all(
+			'~<form[\s\S]+?"data\[form_id]" value="(\d+?)"[\s\S]+?(<input type="submit")[\s\S]+?</form>~',
+			$content,
+			$matches
+		) ) {
+			return $content;
 		}
 
-		$form_id = $block['attrs']['formId'] ?? 0;
-		$search  = '<input type="submit" class="mailpoet_submit"';
-		$args    = [
-			'action' => self::ACTION,
-			'name'   => self::NONCE,
-			'id'     => [
-				'source'  => HCaptcha::get_class_source( __CLASS__ ),
-				'form_id' => $form_id,
-			],
-		];
+		foreach ( $matches[0] as $key => $form ) {
+			if ( false !== strpos( $form, 'h-captcha' ) ) {
+				continue;
+			}
 
-		return str_replace(
-			$search,
-			HCaptcha::form( $args ) . $search,
-			(string) $block_content
-		);
+			$form_id = (int) $matches[1][ $key ];
+
+			$args     = [
+				'action' => self::ACTION,
+				'name'   => self::NONCE,
+				'id'     => [
+					'source'  => HCaptcha::get_class_source( __CLASS__ ),
+					'form_id' => $form_id,
+				],
+			];
+			$hcaptcha = HCaptcha::form( $args );
+
+			$submit  = $matches[2][ $key ];
+			$replace = str_replace( $submit, $hcaptcha . $submit, $form );
+			$content = str_replace( $form, $replace, $content );
+		}
+
+		return $content;
 	}
 
 	/**
 	 * Verify MailPoet captcha.
 	 *
-	 * @param API $api MailPoet API instance.
+	 * @param MailPoetAPI $api MailPoet API instance.
+	 *
+	 * @return void
 	 */
-	public function verify( API $api ): void {
-		if ( is_admin() ) {
+	public function verify( MailPoetAPI $api ): void {
+		if (
+			Request::filter_input( INPUT_POST, 'action' ) !== 'mailpoet' ||
+			Request::filter_input( INPUT_POST, 'endpoint' ) !== 'subscribers' ||
+			Request::filter_input( INPUT_POST, 'method' ) !== 'subscribe'
+		) {
+			// Process frontend subscription ajax request only.
 			return;
 		}
 
-		$error_message = hcaptcha_verify_post( self::NONCE, self::ACTION );
+		$error_message = API::verify_post( self::NONCE, self::ACTION );
 
 		if ( null === $error_message ) {
 			return;

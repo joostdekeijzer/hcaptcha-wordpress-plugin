@@ -8,6 +8,7 @@
 namespace HCaptcha\UM;
 
 use HCaptcha\Abstracts\LoginBase;
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 
 /**
@@ -113,10 +114,6 @@ abstract class Base extends LoginBase {
 	public function add_um_captcha( $fields ) {
 		$um = UM();
 
-		if ( ! $um ) {
-			return $fields;
-		}
-
 		if ( static::UM_MODE !== $um->fields()->set_mode ) {
 			return $fields;
 		}
@@ -194,15 +191,13 @@ abstract class Base extends LoginBase {
 
 		$um = UM();
 
-		if ( ! $um ) {
-			return $output;
-		}
-
 		$fields = $um->fields();
 
 		if ( $fields->is_error( self::KEY ) ) {
 			if ( version_compare( UM_VERSION, '2.7.0', '<' ) ) {
+				// @codeCoverageIgnoreStart
 				$output .= $fields->field_error( $fields->show_error( self::KEY ) );
+				// @codeCoverageIgnoreEnd
 			} else {
 				$output .= $fields->field_error( $fields->show_error( self::KEY ), self::KEY );
 			}
@@ -223,17 +218,11 @@ abstract class Base extends LoginBase {
 	public function verify( array $submitted_data, array $form_data = [] ): void {
 		$um = UM();
 
-		if (
-			! $um ||
-			( isset( $form_data['mode'] ) && $this->um_mode !== $form_data['mode'] )
-		) {
+		if ( isset( $form_data['mode'] ) && $this->um_mode !== $form_data['mode'] ) {
 			return;
 		}
 
-		$error_message = hcaptcha_get_verify_message(
-			$this->hcaptcha_nonce,
-			$this->hcaptcha_action
-		);
+		$error_message = API::verify_post( $this->hcaptcha_nonce, $this->hcaptcha_action );
 
 		if ( null === $error_message ) {
 			return;

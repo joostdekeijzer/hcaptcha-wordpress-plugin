@@ -18,13 +18,14 @@ class DelayedScript {
 	 * Create delayed script.
 	 *
 	 * @param string $js    js code to wrap in setTimeout().
-	 * @param int    $delay Delay in ms.
+	 * @param int    $delay Delay in ms. Negative means no delay, wait for user interaction.
 	 *
 	 * @return string
 	 * @noinspection JSUnusedAssignment
 	 */
-	public static function create( string $js, int $delay = 3000 ): string {
-		$js = <<<JS
+	public static function create( string $js, int $delay = -1 ): string {
+		/* language=JS */
+		$js = "
 	( () => {
 		'use strict';
 
@@ -43,7 +44,8 @@ class DelayedScript {
 			window.removeEventListener( 'touchstart', load );
 			document.body.removeEventListener( 'mouseenter', load );
 			document.body.removeEventListener( 'click', load );
-			window.removeEventListener( 'load', delayedLoad );
+			window.removeEventListener( 'keydown', load );
+			window.removeEventListener( 'scroll', scrollHandler );
 
 $js
 		}
@@ -55,26 +57,25 @@ $js
 				return;
 			}
 
-			window.removeEventListener( 'scroll', scrollHandler );
 			load();
 		}
 
-		function delayedLoad() {
-			window.addEventListener( 'scroll', scrollHandler );
+		document.addEventListener( 'hCaptchaBeforeAPI', function() {
 			// noinspection JSAnnotator
 			const delay = $delay;
 
 			if ( delay >= 0 ) {
-				setTimeout( load, delay );
+				timerId = setTimeout( load, delay );
 			}
-		}
 
-		window.addEventListener( 'touchstart', load );
-		document.body.addEventListener( 'mouseenter', load );
-		document.body.addEventListener( 'click', load );
-		window.addEventListener( 'load', delayedLoad );
+			window.addEventListener( 'touchstart', load );
+			document.body.addEventListener( 'mouseenter', load );
+			document.body.addEventListener( 'click', load );
+			window.addEventListener( 'keydown', load );
+			window.addEventListener( 'scroll', scrollHandler );
+		} );
 	} )();
-JS;
+";
 
 		return "<script>\n" . HCaptcha::js_minify( $js ) . "\n</script>\n";
 	}
@@ -83,34 +84,40 @@ JS;
 	 * Launch script specified by source url.
 	 *
 	 * @param array $args  Arguments.
-	 * @param int   $delay Delay in ms.
+	 * @param int   $delay Delay in ms. Negative means no delay, wait for user interaction.
 	 */
-	public static function launch( array $args, int $delay = 3000 ): void {
-		$js = <<<JS
+	public static function launch( array $args, int $delay = -1 ): void {
+		unset( $args['id'], $args['async'] );
+
+		/* language=JS */
+		$js = "
 			const t = document.getElementsByTagName( 'script' )[0];
-			const s = document.createElement('script');
+			const s = document.createElement( 'script' );
 			s.type  = 'text/javascript';
 			s.id = 'hcaptcha-api';
-JS;
+";
 
-		$js = "$js\n";
+		$js = trim( $js, " \n\r" );
 
 		// phpcs:disable WordPress.Security.EscapeOutput.OutputNotEscaped
 		foreach ( $args as $key => $arg ) {
 			if ( 'data' === $key ) {
 				foreach ( $arg as $data_key => $data_arg ) {
-					$js .= "\t\t\ts.dataset.$data_key = '$data_arg';\n";
+					$js .= "\t\t\ts.setAttribute( 'data-' + '$data_key', '$data_arg' );\n";
 				}
 				continue;
 			}
 
-			$js .= "\t\t\ts['$key'] = '$arg';\n";
+			$js .= "\n\t\t\ts['$key'] = '$arg';";
 		}
 
-		$js .= <<<JS
+		/* language=JS */
+		$js .= '
 			s.async = true;
 			t.parentNode.insertBefore( s, t );
-JS;
+';
+
+		$js = trim( $js, " \n\r" );
 
 		echo self::create( $js, $delay );
 		// phpcs:enable WordPress.Security.EscapeOutput.OutputNotEscaped

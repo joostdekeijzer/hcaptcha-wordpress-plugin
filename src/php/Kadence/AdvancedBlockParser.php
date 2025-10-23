@@ -24,32 +24,28 @@ class AdvancedBlockParser extends WP_Block_Parser {
 	/**
 	 * Parses a document and returns a list of block structures
 	 *
-	 * When encountering an invalid parse will return a best-effort
-	 * parse. In contrast to the specification parser, this does not
-	 * return an error on invalid inputs.
+	 * When encountering an invalid content, parse will return a best-effort parse.
+	 * In contrast to the specification parser, this does not return an error on invalid inputs.
 	 *
 	 * @param string $document Input document being parsed.
+	 *
 	 * @return array[]
 	 */
 	public function parse( $document ): array {
-		$output = parent::parse( $document );
+		$output     = parent::parse( $document );
+		$block      = $output[0] ?? [];
+		$block_name = $block['blockName'] ?? '';
 
-		if ( ! isset( $output[0] ) ) {
+		if ( 'kadence/advanced-form' !== $block_name ) {
 			return $output;
 		}
 
-		$block = $output[0];
-
-		if ( ! ( isset( $block['blockName'] ) && 'kadence/advanced-form' === $block['blockName'] ) ) {
-			return $output;
-		}
-
-		if ( isset( $block['attrs']['id'] ) ) {
-			self::$form_id = $block['attrs']['id'];
-		}
+		self::$form_id = $block['attrs']['id'] ?? 0;
 
 		if ( ! ( isset( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) ) {
+			// @CodeCoverageIgnoreStart
 			return $output;
+			// @codeCoverageIgnoreEnd
 		}
 
 		foreach ( $block['innerBlocks'] as $index => $inner_block ) {

@@ -9,7 +9,7 @@
  * @copyright Copyright (c) 2012, Matthias Mullie. All rights reserved
  * @license MIT License
  */
-namespace HCaptcha\Vendor\MatthiasMullie\Minify;
+namespace HCaptcha\Vendors\MatthiasMullie\Minify;
 
 /**
  * JavaScript Minifier Class.
@@ -116,7 +116,7 @@ class JS extends Minify
     protected $operatorsAfter = array();
     public function __construct()
     {
-        call_user_func_array(array('HCaptcha\Vendor\MatthiasMullie\Minify\Minify', '__construct'), func_get_args());
+        call_user_func_array(array('HCaptcha\Vendors\MatthiasMullie\Minify\Minify', '__construct'), func_get_args());
         $dataDir = __DIR__ . '/../data/js/';
         $options = \FILE_IGNORE_NEW_LINES | \FILE_SKIP_EMPTY_LINES;
         $this->keywordsReserved = file($dataDir . 'keywords_reserved.txt', $options);
@@ -392,7 +392,7 @@ class JS extends Minify
      * This will prepare the given array by escaping all characters.
      *
      * @param string[] $operators
-     * @param string   $delimiter
+     * @param string $delimiter
      *
      * @return string[]
      */
@@ -417,7 +417,7 @@ class JS extends Minify
      * This will prepare the given array by escaping all characters.
      *
      * @param string[] $keywords
-     * @param string   $delimiter
+     * @param string $delimiter
      *
      * @return string[]
      */
@@ -505,7 +505,7 @@ class JS extends Minify
             if (trim($match[1]) === '.') {
                 return $match[0];
             }
-            return $match[1] . (($match[2] === 'true') ? '!0' : '!1');
+            return $match[1] . ($match[2] === 'true' ? '!0' : '!1');
         };
         $content = preg_replace_callback('/(^|.\s*)\b(true|false)\b(?!:)/', $callback, $content);
         // for(;;) is exactly the same as while(true), but shorter :)

@@ -11,6 +11,7 @@
 namespace HCaptcha\Brizy;
 
 use Brizy_Editor_Project;
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 use WP_Post;
 
@@ -101,7 +102,7 @@ abstract class Base {
 			}
 		}
 
-		$error_message = hcaptcha_request_verify( $hcaptcha_response );
+		$error_message = API::verify_request( $hcaptcha_response );
 
 		if ( null !== $error_message ) {
 			wp_send_json_error(
@@ -131,11 +132,12 @@ abstract class Base {
 
 		$style_shown = true;
 
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	.brz-forms2.brz-forms2__item .h-captcha {
 		margin-bottom: 0;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}

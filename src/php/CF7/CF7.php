@@ -10,6 +10,7 @@
 
 namespace HCaptcha\CF7;
 
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 use WPCF7_FormTag;
 use WPCF7_Submission;
@@ -35,6 +36,11 @@ class CF7 extends Base {
 	private const DATA_NAME = 'hcap-cf7';
 
 	/**
+	 * Field type.
+	 */
+	public const FIELD_TYPE = 'hcaptcha';
+
+	/**
 	 * Init hooks.
 	 *
 	 * @return void
@@ -55,18 +61,27 @@ class CF7 extends Base {
 	 *
 	 * @param string|mixed $output Shortcode output.
 	 * @param string       $tag    Shortcode name.
-	 * @param array|string $attr   Shortcode attributes array or empty string.
+	 * @param array|string $attr   Shortcode attribute array or empty string.
 	 * @param array        $m      Regular expression match array.
 	 *
-	 * @return string|mixed
+	 * @return string
 	 * @noinspection PhpUnusedParameterInspection
 	 */
-	public function wpcf7_shortcode( $output, string $tag, $attr, array $m ) {
+	public function wpcf7_shortcode( $output, string $tag, $attr, array $m ): string {
+		$output = (string) $output;
+
 		if ( 'contact-form-7' !== $tag ) {
 			return $output;
 		}
 
-		$output             = (string) $output;
+		if ( $this->has_stripe_element( $output ) ) {
+			/**
+			 * Do not show hCaptcha in the CF7 form having Stripe field.
+			 * Stripe payment form has its own hidden hCaptcha field.
+			 */
+			return preg_replace( '/\[cf7-hcaptcha.*?]/', '', $output );
+		}
+
 		$form_id            = isset( $attr['id'] ) ? (int) $attr['id'] : 0;
 		$cf7_hcap_shortcode = $this->get_cf7_hcap_shortcode( $output );
 
@@ -128,15 +143,27 @@ class CF7 extends Base {
 		$id        = $attr['cf7-id'] ?? uniqid( 'hcap_cf7-', true );
 		$class     = $attr['cf7-class'] ?? '';
 		$hcap_form = preg_replace(
-			[ '/(<div\s+?class="h-captcha")/', '#</div>#' ],
-			[ '<span id="' . esc_attr( $id ) . '" class="wpcf7-form-control h-captcha ' . esc_attr( $class ) . '"', '</span>' ],
+			[
+				'/(<h-captcha\s+?class="h-captcha")/',
+				'#</h-captcha>#',
+			],
+			[
+				'<span id="' . esc_attr( $id ) . '" class="wpcf7-form-control h-captcha ' . esc_attr( $class ) . '"',
+				'</span>',
+			],
 			$hcap_form
 		);
+
+		$submission         = WPCF7_Submission::get_instance();
+		$hcap_invalid_field = $submission ? $submission->get_invalid_field( 'hcap-cf7' ) : [];
+		$reason             = $hcap_invalid_field['reason'] ?? '';
+		$not_valid_tip      = $reason ? '<span class="wpcf7-not-valid-tip" aria-hidden="true">' . $reason . '</span>' : '';
 
 		return (
 			'<span class="wpcf7-form-control-wrap" data-name="' . self::DATA_NAME . '">' .
 			$hcap_form .
-			'</span>'
+			'</span>' .
+			$not_valid_tip
 		);
 	}
 
@@ -168,7 +195,7 @@ class CF7 extends Base {
 	}
 
 	/**
-	 * Verify CF7 recaptcha.
+	 * Verify hCaptcha.
 	 *
 	 * @param WPCF7_Validation|mixed $result Result.
 	 * @param WPCF7_FormTag[]|mixed  $tag    Tag.
@@ -183,16 +210,24 @@ class CF7 extends Base {
 			return $this->get_invalidated_result( $result );
 		}
 
+		if ( $this->has_field( $submission, 'stripe' ) ) {
+			/**
+			 * Do not verify CF7 form having Stripe field.
+			 * Stripe payment form has its own hidden hCaptcha field.
+			 */
+			return $result;
+		}
+
 		if (
 			! $this->mode_auto &&
-			! ( $this->mode_embed && $this->has_hcaptcha_field( $submission ) )
+			! ( $this->mode_embed && $this->has_field( $submission, self::FIELD_TYPE ) )
 		) {
 			return $result;
 		}
 
 		$data           = $submission->get_posted_data();
 		$response       = $data['h-captcha-response'] ?? '';
-		$captcha_result = hcaptcha_request_verify( $response );
+		$captcha_result = API::verify_request( $response );
 
 		if ( null !== $captcha_result ) {
 			return $this->get_invalidated_result( $result, $captcha_result );
@@ -202,37 +237,41 @@ class CF7 extends Base {
 	}
 
 	/**
-	 * Whether the field is hCaptcha field.
-	 *
-	 * @param WPCF7_FormTag $field Field.
-	 *
-	 * @return bool
-	 */
-	private function is_hcaptcha_field( WPCF7_FormTag $field ): bool {
-		return ( 'hcaptcha' === $field->type );
-	}
-
-	/**
-	 * Whether form has its own hCaptcha field.
+	 * Whether form has a field of a given type.
 	 *
 	 * @param WPCF7_Submission $submission Submission.
+	 * @param string           $type       Field type.
 	 *
 	 * @return bool
 	 */
-	protected function has_hcaptcha_field( WPCF7_Submission $submission ): bool {
-		$form_fields = $submission->get_contact_form()->scan_form_tags();
+	protected function has_field( WPCF7_Submission $submission, string $type ): bool {
+		$has_field    = false;
+		$contact_form = $submission->get_contact_form();
 
-		foreach ( $form_fields as $form_field ) {
-			if ( $this->is_hcaptcha_field( $form_field ) ) {
-				return true;
+		if ( self::FIELD_TYPE === $type && has_shortcode( $contact_form->form_html(), 'cf7-hcaptcha' ) ) {
+			$has_field = true;
+		} else {
+			$form_fields = $contact_form->scan_form_tags();
+
+			foreach ( $form_fields as $form_field ) {
+				if ( $type === $form_field->type ) {
+					$has_field = true;
+
+					break;
+				}
 			}
 		}
 
-		return false;
+		/**
+		 * Filter whether a form has a field of a given type.
+		 *
+		 * @param bool $has_field Form has field.
+		 */
+		return apply_filters( 'hcap_cf7_has_field', $has_field, $submission, $type );
 	}
 
 	/**
-	 * Get invalidated result.
+	 * Get an invalidated result.
 	 *
 	 * @param WPCF7_Validation|mixed $result         Result.
 	 * @param string|null            $captcha_result hCaptcha result.
@@ -247,7 +286,7 @@ class CF7 extends Base {
 
 		$result->invalidate(
 			[
-				'type' => 'hcaptcha',
+				'type' => self::FIELD_TYPE,
 				'name' => self::DATA_NAME,
 			],
 			$captcha_result
@@ -284,7 +323,8 @@ class CF7 extends Base {
 	 * @noinspection CssUnusedSymbol
 	 */
 	public function print_inline_styles(): void {
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	span[data-name="hcap-cf7"] .h-captcha {
 		margin-bottom: 0;
 	}
@@ -293,7 +333,7 @@ class CF7 extends Base {
 	span[data-name="hcap-cf7"] ~ button[type="submit"] {
 		margin-top: 2rem;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}
@@ -330,7 +370,7 @@ CSS;
 		}
 
 		$cf7_hcap_sc = preg_replace(
-			[ '/\s*\[|]\s*/', '/(id|class)\s*:\s*([\w-]+)/' ],
+			[ '/\s*\[|]\s*/', '/(id|class|akismet)\s*:\s*([\w-]+)/' ],
 			[ '', '$1=$2' ],
 			$cf7_hcap_shortcode
 		);
@@ -347,7 +387,7 @@ CSS;
 		array_walk(
 			$atts,
 			static function ( &$value, $key ) {
-				if ( in_array( $key, [ 'id', 'class' ], true ) ) {
+				if ( in_array( $key, [ 'id', 'class', 'akismet' ], true ) ) {
 					$value = "$key:$value";
 
 					return;

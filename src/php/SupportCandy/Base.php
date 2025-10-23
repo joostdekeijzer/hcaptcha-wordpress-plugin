@@ -7,6 +7,7 @@
 
 namespace HCaptcha\SupportCandy;
 
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 
 /**
@@ -38,7 +39,7 @@ abstract class Base {
 		add_action( 'wp_ajax_' . static::VERIFY_HOOK, [ $this, 'verify' ], 9 );
 		add_action( 'wp_ajax_nopriv_' . static::VERIFY_HOOK, [ $this, 'verify' ], 9 );
 		add_filter( 'do_shortcode_tag', [ $this, 'support_candy_shortcode_tag' ], 10, 4 );
-		add_action( 'hcap_print_hcaptcha_scripts', [ $this, 'print_hcaptcha_scripts' ] );
+		add_filter( 'hcap_print_hcaptcha_scripts', [ $this, 'print_hcaptcha_scripts' ], 0 );
 		add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_scripts' ] );
 		add_action( 'wp_head', [ $this, 'print_inline_styles' ], 20 );
 	}
@@ -67,10 +68,7 @@ abstract class Base {
 	 * @return void
 	 */
 	public function verify(): void {
-		$error_message = hcaptcha_get_verify_message(
-			static::NAME,
-			static::ACTION
-		);
+		$error_message = API::verify_post( static::NAME, static::ACTION );
 
 		if ( null !== $error_message ) {
 			wp_send_json_error( $error_message, 400 );
@@ -82,7 +80,7 @@ abstract class Base {
 	 *
 	 * @param string|mixed $output Shortcode output.
 	 * @param string       $tag    Shortcode name.
-	 * @param array|string $attr   Shortcode attributes array or empty string.
+	 * @param array|string $attr   Shortcode attribute array or empty string.
 	 * @param array        $m      Regular expression match array.
 	 *
 	 * @return string|mixed
@@ -97,14 +95,14 @@ abstract class Base {
 	}
 
 	/**
-	 * Filter print hCaptcha scripts status and return true if SupportCandy shortcode was used.
+	 * Filter printed hCaptcha scripts status and return true if SupportCandy shortcode was used.
 	 *
 	 * @param bool|mixed $status Print scripts status.
 	 *
-	 * @return bool|mixed
+	 * @return bool
 	 */
-	public function print_hcaptcha_scripts( $status ) {
-		return $this->did_support_candy_shortcode_tag_filter ? true : $status;
+	public function print_hcaptcha_scripts( $status ): bool {
+		return $this->did_support_candy_shortcode_tag_filter || $status;
 	}
 
 	/**
@@ -139,11 +137,12 @@ abstract class Base {
 
 		$style_shown = true;
 
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	form.wpsc-create-ticket .h-captcha {
 		margin: 0 15px 15px 15px;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}

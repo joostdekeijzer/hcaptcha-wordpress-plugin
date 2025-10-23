@@ -1,12 +1,17 @@
 <?php
 /**
- * Migrations class file.
+ * Migration class file.
  *
  * @package hcaptcha-wp
  */
 
+// phpcs:ignore Generic.Commenting.DocComment.MissingShort
+/** @noinspection PhpUndefinedClassInspection */
+
 namespace HCaptcha\Migrations;
 
+use ActionScheduler;
+use ActionScheduler_Store;
 use HCaptcha\Admin\Events\Events;
 use HCaptcha\Settings\PluginSettingsBase;
 
@@ -36,9 +41,24 @@ class Migrations {
 	public const FAILED = - 2;
 
 	/**
+	 * Migration completed status.
+	 */
+	public const COMPLETED = - 3;
+
+	/**
+	 * Priority of the plugins_loaded action to load Migrations.
+	 */
+	public const LOAD_PRIORITY = -PHP_INT_MAX;
+
+	/**
 	 * Plugin name.
 	 */
 	private const PLUGIN_NAME = 'hCaptcha Plugin';
+
+	/**
+	 * Action Scheduler group name.
+	 */
+	private const AS_GROUP = 'hcaptcha';
 
 	/**
 	 * Migration constructor.
@@ -52,11 +72,12 @@ class Migrations {
 	 *
 	 * @return void
 	 */
-	public function init(): void {
+	private function init(): void {
 		if ( ! $this->is_allowed() ) {
 			return;
 		}
 
+		$this->maybe_prepare_migration_option();
 		$this->init_hooks();
 	}
 
@@ -66,7 +87,19 @@ class Migrations {
 	 * @return void
 	 */
 	private function init_hooks(): void {
-		add_action( 'plugins_loaded', [ $this, 'migrate' ], - PHP_INT_MAX );
+		add_action( 'plugins_loaded', [ $this, 'migrate' ], self::LOAD_PRIORITY );
+		add_action( 'plugins_loaded', [ $this, 'load_action_scheduler' ], -10 );
+
+		add_action( 'async_migrate_4_11_0', [ $this, 'async_migrate_4_11_0' ] );
+	}
+
+	/**
+	 * Load action scheduler.
+	 *
+	 * @return void
+	 */
+	public function load_action_scheduler(): void {
+		require_once HCAPTCHA_PATH . '/vendor/woocommerce/action-scheduler/action-scheduler.php';
 	}
 
 	/**
@@ -79,15 +112,9 @@ class Migrations {
 
 		$this->check_plugin_update( $migrated );
 
-		$migrations       = array_filter(
-			get_class_methods( $this ),
-			static function ( $migration ) {
-				return false !== strpos( $migration, 'migrate_' );
-			}
-		);
 		$upgrade_versions = [];
 
-		foreach ( $migrations as $migration ) {
+		foreach ( $this->get_migrations() as $migration ) {
 			$upgrade_version    = $this->get_upgrade_version( $migration );
 			$upgrade_versions[] = $upgrade_version;
 
@@ -120,11 +147,15 @@ class Migrations {
 			$this->log_migration_message( $result, $upgrade_version );
 		}
 
-		// Remove any keys that are not in the migrations list.
+		// Set the current version update time if it does not exist.
+		$current_version_migrated = $migrated[ self::PLUGIN_VERSION ] ?? time();
+
+		// Remove any keys that are not in the migration list.
 		$migrated = array_intersect_key( $migrated, array_flip( $upgrade_versions ) );
 
-		// Store the current version.
-		$migrated[ self::PLUGIN_VERSION ] = $migrated[ self::PLUGIN_VERSION ] ?? time();
+		// Restore the current version update time.
+		// Prevents updating the option on each request.
+		$migrated[ self::PLUGIN_VERSION ] = $current_version_migrated;
 
 		// Sort the array by version.
 		uksort( $migrated, 'version_compare' );
@@ -135,13 +166,54 @@ class Migrations {
 	/**
 	 * Determine if migration is allowed.
 	 */
-	public function is_allowed(): bool {
+	private function is_allowed(): bool {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		if ( isset( $_GET['service-worker'] ) ) {
 			return false;
 		}
 
-		return wp_doing_cron() || is_admin() || ( defined( 'WP_CLI' ) && constant( 'WP_CLI' ) );
+		return (
+			is_admin() ||
+			wp_doing_cron() ||
+			( defined( 'WP_CLI' ) && constant( 'WP_CLI' ) )
+		);
+	}
+
+	/**
+	 * Maybe prepare the migration option.
+	 */
+	private function maybe_prepare_migration_option(): void {
+		$migrated = get_option( self::MIGRATED_VERSIONS_OPTION_NAME );
+
+		// If the option is an array, it means that it is already prepared.
+		if ( is_array( $migrated ) ) {
+			return;
+		}
+
+		$migrated = [];
+
+		foreach ( $this->get_migrations() as $migration ) {
+			$upgrade_version = $this->get_upgrade_version( $migration );
+
+			$migrated[ $upgrade_version ] = 0;
+		}
+
+		// Sort the array by version.
+		uksort( $migrated, 'version_compare' );
+
+		update_option( self::MIGRATED_VERSIONS_OPTION_NAME, $migrated );
+	}
+
+	/**
+	 * Send plugin statistics.
+	 *
+	 * @return void
+	 */
+	public function send_plugin_stats(): void {
+		/**
+		 * Send plugin statistics.
+		 */
+		do_action( 'hcap_send_plugin_stats' );
 	}
 
 	/**
@@ -157,15 +229,7 @@ class Migrations {
 		}
 
 		// Send statistics on plugin update.
-		add_action(
-			'init',
-			static function () {
-				/**
-				 * Send plugin statistics.
-				 */
-				do_action( 'hcap_send_plugin_stats' );
-			}
-		);
+		add_action( 'init', [ $this, 'send_plugin_stats' ] );
 	}
 
 	/**
@@ -176,7 +240,7 @@ class Migrations {
 	 * @return string
 	 */
 	private function get_upgrade_version( string $method ): string {
-		// Find only the digits and underscores to get version number.
+		// Find only the digits and underscores to get the version number.
 		if ( ! preg_match( '/(\d_?)+/', $method, $matches ) ) {
 			// @codeCoverageIgnoreStart
 			return '';
@@ -198,7 +262,7 @@ class Migrations {
 	}
 
 	/**
-	 * Output message into log file.
+	 * Output the message into the log file.
 	 *
 	 * @param string $message Message to log.
 	 *
@@ -303,7 +367,11 @@ class Migrations {
 			}
 		}
 
-		update_option( PluginSettingsBase::OPTION_NAME, $new_options );
+		// These two lines is a precaution for a case if options in a new format already exist.
+		$options = get_option( PluginSettingsBase::OPTION_NAME, [] );
+		$options = array_merge( $new_options, $options );
+
+		update_option( PluginSettingsBase::OPTION_NAME, $options );
 
 		foreach ( array_keys( $options_map ) as $old_option_name ) {
 			delete_option( $old_option_name );
@@ -349,6 +417,58 @@ class Migrations {
 	}
 
 	/**
+	 * Migrate to 4.6.0
+	 *
+	 * @return bool|null
+	 * @noinspection PhpUnused
+	 */
+	protected function migrate_4_6_0(): ?bool {
+		$option         = get_option( PluginSettingsBase::OPTION_NAME, [] );
+		$cf7_status_old = $option['cf7_status'] ?? [];
+		$cf7_status_new = array_unique( array_merge( $cf7_status_old, [ 'live' ] ) );
+
+		if ( $cf7_status_new !== $cf7_status_old ) {
+			// Turn on CF7 Live Form in admin by default.
+			$option['cf7_status'] = $cf7_status_new;
+
+			update_option( PluginSettingsBase::OPTION_NAME, $option );
+		}
+
+		return true;
+	}
+
+	/**
+	 * Migrate to 4.11.0
+	 *
+	 * @return bool|null
+	 * @noinspection PhpUnused
+	 */
+	protected function migrate_4_11_0(): ?bool {
+		return $this->run_async( __FUNCTION__ );
+	}
+
+	/**
+	 * Async migration to 4.11.0.
+	 *
+	 * @return void
+	 */
+	public function async_migrate_4_11_0(): void {
+		global $wpdb;
+
+		$table_name = $wpdb->prefix . Events::TABLE_NAME;
+
+		$this->add_index( $table_name, 'idx_date_source_form', 'date_gmt, source, form_id' );
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$wpdb->query( "DROP INDEX hcaptcha_id on $table_name" );
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		$this->mark_completed();
+	}
+
+	/**
 	 * Save license level in settings.
 	 *
 	 * @return void
@@ -368,5 +488,158 @@ class Migrations {
 
 		// Save license level in settings.
 		update_option( PluginSettingsBase::OPTION_NAME, $option );
+	}
+
+	/**
+	 * Run async action.
+	 *
+	 * @param string $method Method name.
+	 * @param array  $args   Arguments.
+	 *
+	 * @return bool|null
+	 * @noinspection PhpSameParameterValueInspection
+	 */
+	private function run_async( string $method, array $args = [] ): ?bool {
+		$hook      = 'async_' . $method;
+		$group     = self::AS_GROUP;
+		$transient = $group . '_' . $hook;
+
+		$status = (int) get_transient( $transient );
+
+		if ( self::COMPLETED === $status ) {
+			delete_transient( $transient );
+
+			return true;
+		}
+
+		if ( ! $status ) {
+			set_transient( $transient, self::STARTED );
+		}
+
+		add_action(
+			'init',
+			function () use ( $hook, $args, $group ) {
+				$transient = $group . '_' . $hook;
+				$status    = $this->create_as_action( $hook, $args, $group );
+
+				if ( self::FAILED === $status ) {
+					set_transient( $transient, $status );
+				}
+			},
+			20
+		);
+
+		return null;
+	}
+
+	/**
+	 * Create an AS action.
+	 *
+	 * @param string $hook  Hook name.
+	 * @param array  $args  Hook arguments.
+	 * @param string $group Group name.
+	 *
+	 * @return int Started or failed.
+	 * @noinspection PhpUndefinedFunctionInspection
+	 */
+	private function create_as_action( string $hook, array $args, string $group ): int {
+		$actions = as_get_scheduled_actions(
+			[
+				'hook'   => $hook,
+				'args'   => $args,
+				'group'  => $group,
+				'status' => [ // All statuses except completed.
+					ActionScheduler_Store::STATUS_PENDING,
+					ActionScheduler_Store::STATUS_RUNNING,
+					ActionScheduler_Store::STATUS_FAILED,
+					ActionScheduler_Store::STATUS_CANCELED,
+				],
+			]
+		);
+
+		if ( empty( $actions ) ) {
+			// Plan the unique action.
+			$action_id = as_enqueue_async_action( $hook, $args, $group, true );
+
+			return $action_id ? self::STARTED : self::FAILED;
+		}
+
+		// Get the last action status.
+		$last_action_id = max( array_map( 'intval', array_keys( $actions ) ) );
+		$store          = ActionScheduler::store();
+		$status         = $store ? $store->get_status( $last_action_id ) : ActionScheduler_Store::STATUS_FAILED;
+
+		$started = in_array(
+			$status,
+			[
+				ActionScheduler_Store::STATUS_PENDING,
+				ActionScheduler_Store::STATUS_RUNNING,
+			],
+			true
+		);
+
+		return $started ? self::STARTED : self::FAILED;
+	}
+
+	/**
+	 * Mark async migration as completed.
+	 *
+	 * @return void
+	 */
+	private function mark_completed(): void {
+		$hook      = current_action();
+		$group     = self::AS_GROUP;
+		$transient = $group . '_' . $hook;
+
+		set_transient( $transient, self::COMPLETED );
+	}
+
+	/**
+	 * Add an index to a table.
+	 *
+	 * @param string $table_name Table.
+	 * @param string $index_name Index name.
+	 * @param string $key_part   Key part.
+	 *
+	 * @return void
+	 * @noinspection PhpSameParameterValueInspection
+	 */
+	private function add_index( string $table_name, string $index_name, string $key_part ): void {
+		global $wpdb;
+
+		// Check id index already exists.
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$result = $wpdb->get_var(
+			"SELECT COUNT(1) IndexIsThere
+					FROM INFORMATION_SCHEMA.STATISTICS
+					WHERE table_schema = DATABASE()
+      					AND table_name = '$table_name'
+          				AND index_name = '$index_name'"
+		);
+
+		if ( '0' !== $result ) {
+			return;
+		}
+
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.NoCaching
+
+		// Change the column length for the wp_wpforms_entry_meta.type column to 255 and add an index.
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->query( "CREATE INDEX $index_name ON $table_name ( $key_part )" );
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.NoCaching
+	}
+
+	/**
+	 * Get migrations.
+	 *
+	 * @return string[]
+	 */
+	private function get_migrations(): array {
+		return array_filter(
+			get_class_methods( $this ),
+			static function ( $migration ) {
+				return 0 === strpos( $migration, 'migrate_' );
+			}
+		);
 	}
 }

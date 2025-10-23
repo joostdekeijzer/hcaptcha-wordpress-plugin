@@ -5,6 +5,7 @@
  */
 
 import HCaptcha from './hcaptcha';
+import HCaptchaCustomElement from './hcaptcha-custom-element';
 
 const hCaptcha = new HCaptcha();
 
@@ -19,7 +20,9 @@ window.hCaptchaReset = ( el ) => {
 };
 
 window.hCaptchaBindEvents = () => {
+	document.dispatchEvent( new CustomEvent( 'hCaptchaBeforeBindEvents' ) );
 	hCaptcha.bindEvents();
+	document.dispatchEvent( new CustomEvent( 'hCaptchaAfterBindEvents' ) );
 };
 
 window.hCaptchaSubmit = () => {
@@ -29,13 +32,12 @@ window.hCaptchaSubmit = () => {
 window.hCaptchaOnLoad = () => {
 	function hCaptchaOnLoad() {
 		window.hCaptchaBindEvents();
-		document.dispatchEvent( new CustomEvent( 'hCaptchaLoaded' ) );
+		document.dispatchEvent( new CustomEvent( 'hCaptchaLoaded', { cancelable: true } ) );
 	}
 
-	// Sync with DOMContentLoaded event.
-	if ( document.readyState === 'loading' ) {
-		window.addEventListener( 'DOMContentLoaded', hCaptchaOnLoad );
-	} else {
-		hCaptchaOnLoad();
-	}
+	hCaptcha.addSyncedEventListener( hCaptchaOnLoad );
 };
+
+window.customElements.define( 'h-captcha', HCaptchaCustomElement );
+
+document.dispatchEvent( new CustomEvent( 'hCaptchaBeforeAPI' ) );

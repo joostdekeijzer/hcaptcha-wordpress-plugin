@@ -1,6 +1,6 @@
 <?php
 /**
- * Contact class file.
+ * The Contact class file.
  *
  * @package hcaptcha-wp
  */
@@ -11,12 +11,14 @@
 namespace HCaptcha\BeaverBuilder;
 
 use FLBuilderModule;
+use HCaptcha\Helpers\API;
 use stdClass;
 
 /**
  * Class Contact.
  */
 class Contact extends Base {
+
 	/**
 	 * Nonce action.
 	 */
@@ -40,7 +42,7 @@ class Contact extends Base {
 	}
 
 	/**
-	 * Filters the Beaver Builder Contact Form submit button html and adds hcaptcha.
+	 * Filters the Beaver Builder Contact Form submit button HTML and adds hCaptcha.
 	 *
 	 * @param string|mixed    $out    Button html.
 	 * @param FLBuilderModule $module Button module.
@@ -71,7 +73,7 @@ class Contact extends Base {
 	 */
 	public function verify( string $mailto, string $subject, string $template, array $headers, stdClass $settings ): void {
 
-		$result = hcaptcha_verify_post( self::NONCE, self::ACTION );
+		$result = API::verify_post( self::NONCE, self::ACTION );
 
 		if ( null === $result ) {
 			return;

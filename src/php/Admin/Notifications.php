@@ -5,19 +5,19 @@
  * @package hcaptcha-wp
  */
 
+// phpcs:ignore Generic.Commenting.DocComment.MissingShort
+/** @noinspection PhpUndefinedClassInspection */
+
 namespace HCaptcha\Admin;
 
-use HCaptcha\Settings\EventsPage;
-use HCaptcha\Settings\FormsPage;
-use HCaptcha\Settings\General;
-use HCaptcha\Settings\Integrations;
+use ElementorPro\Plugin;
 
 /**
  * Class Notifications.
  *
  * Show notifications in the admin.
  */
-class Notifications {
+class Notifications extends NotificationsBase {
 
 	/**
 	 * Admin script handle.
@@ -52,13 +52,6 @@ class Notifications {
 	protected $notifications = [];
 
 	/**
-	 * Shuffle notifications.
-	 *
-	 * @var bool
-	 */
-	protected $shuffle = true;
-
-	/**
 	 * Init class.
 	 *
 	 * @return void
@@ -79,39 +72,14 @@ class Notifications {
 	}
 
 	/**
-	 * Get tab url.
-	 *
-	 * @param string $classname Tab class name.
-	 *
-	 * @return string
-	 */
-	private function tab_url( string $classname ): string {
-		$tab = hcaptcha()->settings()->get_tab( $classname );
-
-		return $tab ? $tab->tab_url( $tab ) : '';
-	}
-
-	/**
 	 * Get notifications.
 	 *
 	 * @return array
 	 * @noinspection HtmlUnknownTarget
 	 */
 	protected function get_notifications(): array {
-		$general_url             = $this->tab_url( General::class );
-		$integrations_url        = $this->tab_url( Integrations::class );
-		$forms_url               = $this->tab_url( FormsPage::class );
-		$events_url              = $this->tab_url( EventsPage::class );
-		$hcaptcha_url            = 'https://www.hcaptcha.com/?r=wp&utm_source=wordpress&utm_medium=wpplugin&utm_campaign=sk';
-		$register_url            = 'https://www.hcaptcha.com/signup-interstitial/?r=wp&utm_source=wordpress&utm_medium=wpplugin&utm_campaign=sk';
-		$pro_url                 = 'https://www.hcaptcha.com/pro?r=wp&utm_source=wordpress&utm_medium=wpplugin&utm_campaign=not';
-		$dashboard_url           = 'https://dashboard.hcaptcha.com/?r=wp&utm_source=wordpress&utm_medium=wpplugin&utm_campaign=not';
-		$post_leadership_url     = 'https://www.hcaptcha.com/post/hcaptcha-named-a-technology-leader-in-bot-management/?r=wp&utm_source=wordpress&utm_medium=wpplugin&utm_campaign=not';
-		$rate_url                = 'https://wordpress.org/support/plugin/hcaptcha-for-forms-and-more/reviews/?filter=5#new-post';
-		$search_integrations_url = $integrations_url . '#hcaptcha-integrations-search';
-		$enterprise_features_url = 'https://www.hcaptcha.com/#enterprise-features?r=wp&utm_source=wordpress&utm_medium=wpplugin&utm_campaign=not';
-		$statistics_url          = $general_url . '#statistics_1';
-		$force_url               = $general_url . '#force_1';
+		$settings = hcaptcha()->settings();
+		$urls     = $this->prepare_urls();
 
 		$notifications = [
 			'register'            => [
@@ -121,17 +89,17 @@ class Notifications {
 					__( 'To use %1$s, please register %2$s to get your site and secret keys.', 'hcaptcha-for-forms-and-more' ),
 					sprintf(
 						'<a href="%1$s" target="_blank">%2$s</a>',
-						$hcaptcha_url,
+						$urls['hcaptcha'],
 						__( 'hCaptcha', 'hcaptcha-for-forms-and-more' )
 					),
 					sprintf(
 						'<a href="%1$s" target="_blank">%2$s</a>',
-						$register_url,
+						$urls['register'],
 						__( 'here', 'hcaptcha-for-forms-and-more' )
 					)
 				),
 				'button'  => [
-					'url'  => $register_url,
+					'url'  => $urls['register'],
 					'text' => __( 'Get site keys', 'hcaptcha-for-forms-and-more' ),
 				],
 			],
@@ -142,17 +110,17 @@ class Notifications {
 					__( 'Want low friction and custom themes? %1$s is for you. %2$s, no credit card required.', 'hcaptcha-for-forms-and-more' ),
 					sprintf(
 						'<a href="%1$s" target="_blank">%2$s</a>',
-						$pro_url,
+						$urls['pro'],
 						__( 'hCaptcha Pro', 'hcaptcha-for-forms-and-more' )
 					),
 					sprintf(
 						'<a href="%1$s" target="_blank">%2$s</a>',
-						$dashboard_url,
+						$urls['dashboard'],
 						__( 'Start a free trial in your dashboard', 'hcaptcha-for-forms-and-more' )
 					)
 				),
 				'button'  => [
-					'url'  => $pro_url,
+					'url'  => $urls['pro'],
 					'text' => __( 'Try Pro', 'hcaptcha-for-forms-and-more' ),
 				],
 			],
@@ -160,7 +128,7 @@ class Notifications {
 				'title'   => __( 'hCaptcha\'s Leadership', 'hcaptcha-for-forms-and-more' ),
 				'message' => __( 'hCaptcha Named a Technology Leader in Bot Management: 2023 SPARK Matrix™', 'hcaptcha-for-forms-and-more' ),
 				'button'  => [
-					'url'  => $post_leadership_url,
+					'url'  => $urls['post_leadership'],
 					'text' => __( 'Read post', 'hcaptcha-for-forms-and-more' ),
 				],
 			],
@@ -169,27 +137,27 @@ class Notifications {
 				'message' => sprintf(
 				/* translators: 1: plugin name, 2: wp.org review link with stars, 3: wp.org review link with text. */
 					__( 'Please rate %1$s %2$s on %3$s. Thank you!', 'hcaptcha-for-forms-and-more' ),
-					'<strong>hCaptcha for WP</strong>',
+					'<strong>' . $settings->get_plugin_name() . '</strong>',
 					sprintf(
 						'<a href="%1$s" target="_blank" rel="noopener noreferrer">★★★★★</a>',
-						$rate_url
+						$urls['rate']
 					),
 					sprintf(
 						'<a href="%1$s" target="_blank" rel="noopener noreferrer">WordPress.org</a>',
-						$rate_url
+						$urls['rate']
 					)
 				),
 				'button'  => [
-					'url'  => $rate_url,
+					'url'  => $urls['rate'],
 					'text' => __( 'Rate', 'hcaptcha-for-forms-and-more' ),
 				],
 			],
 			// Added in 3.8.0.
 			'search-integrations' => [
 				'title'   => __( 'Search on Integrations page', 'hcaptcha-for-forms-and-more' ),
-				'message' => __( 'Now you can search for plugin an themes on the Integrations page.', 'hcaptcha-for-forms-and-more' ),
+				'message' => __( 'You can search for plugin an themes on the Integrations page.', 'hcaptcha-for-forms-and-more' ),
 				'button'  => [
-					'url'  => $search_integrations_url,
+					'url'  => $urls['search_integrations'],
 					'text' => __( 'Start search', 'hcaptcha-for-forms-and-more' ),
 				],
 			],
@@ -198,7 +166,7 @@ class Notifications {
 				'title'   => __( 'Support for Enterprise features', 'hcaptcha-for-forms-and-more' ),
 				'message' => __( 'The hCaptcha plugin commenced support for Enterprise features. Solve your fraud and abuse problem today.', 'hcaptcha-for-forms-and-more' ),
 				'button'  => [
-					'url'  => $enterprise_features_url,
+					'url'  => $urls['enterprise_features'],
 					'text' => __( 'Get started', 'hcaptcha-for-forms-and-more' ),
 				],
 			],
@@ -210,17 +178,17 @@ class Notifications {
 					__( '%1$s events statistics and %2$s how your forms are used.', 'hcaptcha-for-forms-and-more' ),
 					sprintf(
 						'<a href="%1$s" target="_blank">%2$s</a>',
-						$statistics_url,
+						$urls['statistics'],
 						__( 'Turn on', 'hcaptcha-for-forms-and-more' )
 					),
 					sprintf(
 						'<a href="%1$s" target="_blank">%2$s</a>',
-						$forms_url,
+						$urls['forms'],
 						__( 'see', 'hcaptcha-for-forms-and-more' )
 					)
 				),
 				'button'  => [
-					'url'  => $statistics_url,
+					'url'  => $urls['statistics'],
 					'text' => __( 'Turn on stats', 'hcaptcha-for-forms-and-more' ),
 				],
 			],
@@ -232,22 +200,22 @@ class Notifications {
 					__( '%1$s events statistics and %2$s to %3$s complete statistics on form events.', 'hcaptcha-for-forms-and-more' ),
 					sprintf(
 						'<a href="%1$s" target="_blank">%2$s</a>',
-						$statistics_url,
+						$urls['statistics'],
 						__( 'Turn on', 'hcaptcha-for-forms-and-more' )
 					),
 					sprintf(
 						'<a href="%1$s" target="_blank">%2$s</a>',
-						$dashboard_url,
+						$urls['dashboard'],
 						__( 'upgrade to Pro', 'hcaptcha-for-forms-and-more' )
 					),
 					sprintf(
 						'<a href="%1$s" target="_blank">%2$s</a>',
-						$events_url,
+						$urls['events'],
 						__( 'see', 'hcaptcha-for-forms-and-more' )
 					)
 				),
 				'button'  => [
-					'url'  => $statistics_url,
+					'url'  => $urls['statistics'],
 					'text' => __( 'Turn on stats', 'hcaptcha-for-forms-and-more' ),
 				],
 			],
@@ -256,7 +224,7 @@ class Notifications {
 				'title'   => __( 'Force hCaptcha', 'hcaptcha-for-forms-and-more' ),
 				'message' => __( 'Force hCaptcha check before submitting the form and simplify the user experience.', 'hcaptcha-for-forms-and-more' ),
 				'button'  => [
-					'url'  => $force_url,
+					'url'  => $urls['force'],
 					'text' => __( 'Turn on force', 'hcaptcha-for-forms-and-more' ),
 				],
 			],
@@ -265,27 +233,144 @@ class Notifications {
 				'title'   => __( 'Activation of dependent plugins', 'hcaptcha-for-forms-and-more' ),
 				'message' => __( 'Automatic activation of dependent plugins on the Integrations page. Try to activate Elementor or Woo Wishlists.', 'hcaptcha-for-forms-and-more' ),
 				'button'  => [
-					'url'  => $integrations_url,
+					'url'  => $urls['integrations'],
 					'text' => __( 'Try auto-activation', 'hcaptcha-for-forms-and-more' ),
+				],
+			],
+			// Added in 4.4.0.
+			'admin-elementor'     => [
+				'title'   => __( 'Add hCaptcha to Elementor Pro Form', 'hcaptcha-for-forms-and-more' ),
+				'message' => __( 'Add hCaptcha to Elementor Pro Form in the Elementor admin editor.', 'hcaptcha-for-forms-and-more' ),
+				'button'  => [
+					'url'      => $urls['elementor_edit_form'],
+					'text'     => __( 'See an example', 'hcaptcha-for-forms-and-more' ),
+					'lightbox' => true,
+				],
+			],
+			// Added in 4.12.0.
+			'passive-mode'        => [
+				'title'   => __( 'Friction-free “No CAPTCHA” & 99.9% passive modes', 'hcaptcha-for-forms-and-more' ),
+				'message' => sprintf(
+				/* translators: 1: Pro link, 2: size select link. */
+					__( '%1$s and use %2$s. The hCaptcha widget will not appear, and the Challenge popup will be shown only to bots.', 'hcaptcha-for-forms-and-more' ),
+					sprintf(
+						'<a href="%1$s" target="_blank">%2$s</a>',
+						$urls['dashboard'],
+						__( 'Upgrade to Pro', 'hcaptcha-for-forms-and-more' )
+					),
+					sprintf(
+						'<a href="%1$s" target="_blank">%2$s</a>',
+						$urls['size'],
+						__( 'Invisible Size', 'hcaptcha-for-forms-and-more' )
+					)
+				),
+				'button'  => [
+					'url'      => $urls['passive_mode_demo'],
+					'text'     => __( 'See an example', 'hcaptcha-for-forms-and-more' ),
+					'lightbox' => true,
+				],
+			],
+			// Added in 4.13.0.
+			'protect-content'     => [
+				'title'   => __( 'Protect Site Content', 'hcaptcha-for-forms-and-more' ),
+				'message' => sprintf(
+				/* translators: 1: the protect switch link, 2: Pro link. */
+					__( '%1$s selected site URLs from bots with hCaptcha. Works best with %2$s 99.9%% passive mode.', 'hcaptcha-for-forms-and-more' ),
+					sprintf(
+						'<a href="%1$s" target="_blank">%2$s</a>',
+						$urls['protect_content'],
+						__( 'Protect', 'hcaptcha-for-forms-and-more' )
+					),
+					sprintf(
+						'<a href="%1$s" target="_blank">%2$s</a>',
+						$urls['dashboard'],
+						__( 'Pro', 'hcaptcha-for-forms-and-more' )
+					)
+				),
+				'button'  => [
+					'url'      => $urls['protect_content_demo'],
+					'text'     => __( 'See an example', 'hcaptcha-for-forms-and-more' ),
+					'lightbox' => true,
+				],
+			],
+			// Added in 4.18.0.
+			'antispam-token'      => [
+				'title'   => __( 'Anti-Spam Token', 'hcaptcha-for-forms-and-more' ),
+				'message' => sprintf(
+				/* translators: 1: the submit time switch link. */
+					__( 'Add minimum form %1$s for bot detection before processing hCaptcha.', 'hcaptcha-for-forms-and-more' ),
+					sprintf(
+						'<a href="%1$s" target="_blank">%2$s</a>',
+						$urls['token'],
+						__( 'submit time', 'hcaptcha-for-forms-and-more' )
+					)
+				),
+				'button'  => [
+					'url'  => $urls['token'],
+					'text' => __( 'Turn on minimum submit time', 'hcaptcha-for-forms-and-more' ),
+				],
+			],
+			// Added in 4.18.0.
+			'antispam-honeypot'   => [
+				'title'   => __( 'Anti-Spam Honeypot', 'hcaptcha-for-forms-and-more' ),
+				'message' => sprintf(
+				/* translators: 1: the honeypot switch link. */
+					__( 'Add a hidden %1$s field for bot detection before processing hCaptcha.', 'hcaptcha-for-forms-and-more' ),
+					sprintf(
+						'<a href="%1$s" target="_blank">%2$s</a>',
+						$urls['honeypot'],
+						__( 'honeypot', 'hcaptcha-for-forms-and-more' )
+					)
+				),
+				'button'  => [
+					'url'  => $urls['honeypot'],
+					'text' => __( 'Turn on honeypot', 'hcaptcha-for-forms-and-more' ),
 				],
 			],
 		];
 
-		$settings = hcaptcha()->settings();
+		$notifications = $this->select_active_notifications( $notifications );
 
-		if ( ! empty( $settings->get_site_key() ) && ! empty( $settings->get_secret_key() ) ) {
-			unset( $notifications['register'] );
+		// Added in 4.4.0.
+		return array_merge( $notifications, $this->cf7_admin_notification() );
+	}
+
+	/**
+	 * Contact Form 7 admin notification.
+	 *
+	 * @return array
+	 */
+	private function cf7_admin_notification(): array {
+		if ( ! class_exists( 'WPCF7_ContactForm' ) ) {
+			return [];
 		}
 
-		if ( $settings->is_pro() ) {
-			unset( $notifications['pro-free-trial'] );
+		// Get the latest CF7 form.
+		$args      = [
+			'post_type'      => 'wpcf7_contact_form',
+			'posts_per_page' => 1,
+			'orderby'        => 'date',
+			'order'          => 'DESC',
+		];
+		$cf7_forms = get_posts( $args );
+
+		if ( empty( $cf7_forms ) ) {
+			return [];
 		}
 
-		if ( $settings->is_on( 'force' ) ) {
-			unset( $notifications['force'] );
-		}
+		$form_id  = $cf7_forms[0]->ID;
+		$edit_url = admin_url( "?page=wpcf7&post=$form_id&action=edit#postbox-container-live" );
 
-		return $notifications;
+		return [
+			'admin-cf7' => [
+				'title'   => __( 'Live form in Contact Form 7 admin', 'hcaptcha-for-forms-and-more' ),
+				'message' => __( 'With the hCaptcha plugin, you can see a live form on the form edit admin page.', 'hcaptcha-for-forms-and-more' ),
+				'button'  => [
+					'url'  => $edit_url,
+					'text' => __( 'Use live form', 'hcaptcha-for-forms-and-more' ),
+				],
+			],
+		];
 	}
 
 	/**
@@ -314,31 +399,48 @@ class Notifications {
 			</div>
 			<?php
 
-			if ( $this->shuffle ) {
+			/**
+			 * Filter whether to shuffle notifications.
+			 *
+			 * @param bool $shuffle Whether to shuffle notifications.
+			 */
+			$shuffle = (bool) apply_filters( 'hcap_shuffle_notifications', true );
+
+			if ( $shuffle ) {
 				$notifications = $this->shuffle_assoc( $notifications );
 				$notifications = $this->make_key_first( $notifications, 'register' );
+			} else {
+				$notifications = array_reverse( $notifications );
 			}
 
 			foreach ( $notifications as $id => $notification ) {
-				$title       = $notification['title'] ?: '';
-				$message     = $notification['message'] ?? '';
-				$button_url  = $notification['button']['url'] ?? '';
-				$button_text = $notification['button']['text'] ?? '';
-				$button      = '';
+				$notification    = $this->validate_notification( (array) $notification );
+				$title           = $notification['title'];
+				$message         = $notification['message'];
+				$button_url      = $notification['button']['url'];
+				$button_text     = $notification['button']['text'];
+				$button_lightbox = $notification['button']['lightbox'];
+				$button          = '';
 
 				if ( $button_url && $button_text ) {
+					$lightbox_class = $button_lightbox ? ' hcaptcha-lightbox' : '';
 					ob_start();
+
 					?>
 					<div class="hcaptcha-notification-buttons hidden">
-						<a href="<?php echo esc_url( $button_url ); ?>" class="button button-primary" target="_blank">
+						<a
+								href="<?php echo esc_url( $button_url ); ?>"
+								class="button button-primary <?php echo esc_attr( $lightbox_class ); ?>"
+								target="_blank">
 							<?php echo esc_html( $button_text ); ?>
 						</a>
 					</div>
 					<?php
+
 					$button = ob_get_clean();
 				}
 
-				// We need 'inline' class below to prevent moving the 'notice' div after h2 by common.js script in WP Core.
+				// We need the 'inline' class below to prevent moving the 'notice' div after h2 by common.js script in WP Core.
 				?>
 				<div
 						class="hcaptcha-notification notice notice-info is-dismissible inline"
@@ -357,8 +459,13 @@ class Notifications {
 			?>
 			<div id="hcaptcha-notifications-footer">
 				<div id="hcaptcha-navigation">
-					<a class="prev disabled"></a>
-					<a class="next <?php echo esc_attr( $next_disabled ); ?>"></a>
+					<span>
+						<span id="hcaptcha-navigation-page">1</span>
+						<?php esc_html_e( 'of', 'hcaptcha-for-forms-and-more' ); ?>
+						<span id="hcaptcha-navigation-pages"><?php echo count( $notifications ); ?></span>
+					</span>
+					<a class="prev button disabled"></a>
+					<a class="next button <?php echo esc_attr( $next_disabled ); ?>"></a>
 				</div>
 			</div>
 		</div>
@@ -496,7 +603,6 @@ class Notifications {
 	 * @param array $arr Array.
 	 *
 	 * @return array
-	 * @noinspection NonSecureShuffleUsageInspection
 	 */
 	private function shuffle_assoc( array $arr ): array {
 		$new_arr = [];
@@ -530,5 +636,71 @@ class Notifications {
 
 		// Merge the key-value pair back into the array at the beginning.
 		return array_merge( [ $key => $value ], $arr );
+	}
+
+	/**
+	 * Validate notification.
+	 *
+	 * @param array $notification Notification.
+	 *
+	 * @return mixed
+	 */
+	private function validate_notification( array $notification ): array {
+		$notification['title']              = $notification['title'] ?: '';
+		$notification['message']            = $notification['message'] ?? '';
+		$notification['button']['url']      = $notification['button']['url'] ?? '';
+		$notification['button']['text']     = $notification['button']['text'] ?? '';
+		$notification['button']['lightbox'] = $notification['button']['lightbox'] ?? '';
+
+		return $notification;
+	}
+
+	/**
+	 * Select active notifications.
+	 *
+	 * @param array $notifications Notifications.
+	 *
+	 * @return array
+	 */
+	private function select_active_notifications( array $notifications ): array {
+		$settings = hcaptcha()->settings();
+
+		// Key: option name, value: notification id.
+		$settings_map = [
+			'statistics'          => 'statistics',
+			'force'               => 'force',
+			'protect_content'     => 'protect-content',
+			'antispam'            => 'antispam',
+			'set_min_submit_time' => 'antispam-token',
+			'honeypot'            => 'antispam-honeypot',
+		];
+
+		foreach ( $settings_map as $option => $notification_id ) {
+			if ( $settings->is_on( $option ) ) {
+				unset( $notifications[ $notification_id ] );
+			}
+		}
+
+		if ( ! empty( $settings->get_site_key() ) && ! empty( $settings->get_secret_key() ) ) {
+			unset( $notifications['register'] );
+		}
+
+		if ( $settings->is_pro() ) {
+			unset( $notifications['pro-free-trial'] );
+		}
+
+		if ( $settings->is_pro() && $settings->is_on( 'statistics' ) ) {
+			unset( $notifications['events_page'] );
+		}
+
+		if ( ! class_exists( Plugin::class, false ) ) {
+			unset( $notifications['admin-elementor'] );
+		}
+
+		if ( $settings->is_pro() && $settings->is( 'size', 'invisible' ) ) {
+			unset( $notifications['passive-mode'] );
+		}
+
+		return $notifications;
 	}
 }

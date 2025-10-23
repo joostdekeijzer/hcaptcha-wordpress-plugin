@@ -6,7 +6,6 @@
  */
 
 // phpcs:ignore Generic.Commenting.DocComment.MissingShort
-/** @noinspection ContractViolationInspection */
 
 namespace HCaptcha\Settings;
 
@@ -16,7 +15,7 @@ use KAGG\Settings\Abstracts\SettingsInterface;
 /**
  * Class Settings
  *
- * The central point to get settings from.
+ * The central point is to get settings from.
  */
 class Settings implements SettingsInterface {
 
@@ -105,9 +104,7 @@ class Settings implements SettingsInterface {
 	 * @return PluginSettingsBase|null
 	 */
 	public function get_tab( string $classname ): ?PluginSettingsBase {
-		$tabs = hcaptcha()->settings()->get_tabs();
-
-		foreach ( $tabs as $tab ) {
+		foreach ( $this->tabs as $tab ) {
 			if ( is_a( $tab, $classname ) ) {
 				return $tab;
 			}
@@ -117,7 +114,7 @@ class Settings implements SettingsInterface {
 	}
 
 	/**
-	 * Get active tab name.
+	 * Get an active tab name.
 	 *
 	 * @return string
 	 */
@@ -125,6 +122,15 @@ class Settings implements SettingsInterface {
 		$first_tab = $this->tabs[0] ?? null;
 
 		return $first_tab ? $first_tab->get_active_tab()->tab_name() : '';
+	}
+
+	/**
+	 * Get the plugin name.
+	 *
+	 * @return string
+	 */
+	public function get_plugin_name(): string {
+		return 'hCaptcha for WP';
 	}
 
 	/**
@@ -152,6 +158,25 @@ class Settings implements SettingsInterface {
 	 */
 	public function get_config_params(): array {
 		return (array) ( json_decode( $this->get( 'config_params' ), true ) ?: [] );
+	}
+
+	/**
+	 * Get custom background.
+	 *
+	 * @return string
+	 */
+	public function get_custom_theme_background(): string {
+		$bg = '';
+
+		if (
+			$this->is_on( 'custom_themes' ) &&
+			$this->is_pro_or_general() &&
+			$this->is( 'mode', 'live' )
+		) {
+			$bg = $this->get_config_params()['theme']['component']['checkbox']['main']['fill'] ?? $bg;
+		}
+
+		return $bg;
 	}
 
 	/**
@@ -209,7 +234,7 @@ class Settings implements SettingsInterface {
 	}
 
 	/**
-	 * Check whether option value equals to the compared one.
+	 * Check whether the option value equals to the compared one.
 	 *
 	 * @param string $key     Setting name.
 	 * @param string $compare Compared value.
@@ -227,14 +252,20 @@ class Settings implements SettingsInterface {
 	}
 
 	/**
-	 * Check whether option value is 'on' or just non-empty.
+	 * Check whether the option value is 'on' or just non-empty.
 	 *
 	 * @param string $key Setting name.
 	 *
 	 * @return bool
 	 */
 	public function is_on( string $key ): bool {
-		return ! empty( $this->get( $key ) );
+		$value = $this->get( $key );
+
+		if ( is_array( $value ) ) {
+			return [ 'on' ] === $value;
+		}
+
+		return ! empty( $value );
 	}
 
 	/**
@@ -292,7 +323,7 @@ class Settings implements SettingsInterface {
 	}
 
 	/**
-	 * Get secret key.
+	 * Get a secret key.
 	 *
 	 * @return string
 	 */
@@ -307,7 +338,7 @@ class Settings implements SettingsInterface {
 	}
 
 	/**
-	 * Get theme.
+	 * Get a theme.
 	 *
 	 * @return string
 	 */

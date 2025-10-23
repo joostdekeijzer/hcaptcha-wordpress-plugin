@@ -1,6 +1,6 @@
 <?php
 /**
- * Form class file.
+ * 'Form' class file.
  *
  * @package hcaptcha-wp
  */
@@ -12,6 +12,7 @@
 
 namespace HCaptcha\HTMLForms;
 
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 
 /**
@@ -130,10 +131,7 @@ class Form {
 	public function verify( $error_code, \HTML_Forms\Form $form, array $data ): string {
 		$error_code = (string) $error_code;
 
-		$this->error_message = hcaptcha_verify_post(
-			self::NONCE,
-			self::ACTION
-		);
+		$this->error_message = API::verify_post( self::NONCE, self::ACTION );
 
 		if ( null !== $this->error_message ) {
 			return self::HCAPTCHA_ERROR;
@@ -144,7 +142,7 @@ class Form {
 
 	/**
 	 * Filter inserted post data.
-	 * Remove <div class="h-captcha"> form the content.
+	 * Remove <div class="h-captcha"> from the content.
 	 *
 	 * @param array|mixed $data                An array of slashed, sanitized, and processed post data.
 	 * @param array       $postarr             An array of sanitized (and slashed) but otherwise unmodified post data.
@@ -196,7 +194,8 @@ class Form {
 	 * @noinspection CssUnusedSymbol
 	 */
 	public function print_inline_styles(): void {
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	#form-preview .h-captcha {
 		margin-bottom: 2rem;
 	}
@@ -204,7 +203,7 @@ class Form {
 	.hf-fields-wrap .h-captcha {
 		margin-top: 2rem;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}

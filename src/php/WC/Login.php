@@ -8,6 +8,7 @@
 namespace HCaptcha\WC;
 
 use HCaptcha\Abstracts\LoginBase;
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 use WP_Error;
 
@@ -45,10 +46,7 @@ class Login extends LoginBase {
 			return $validation_error;
 		}
 
-		$error_message = hcaptcha_get_verify_message(
-			self::NONCE,
-			self::ACTION
-		);
+		$error_message = API::verify_post( self::NONCE, self::ACTION );
 
 		if ( null === $error_message ) {
 			return $validation_error;
@@ -70,11 +68,12 @@ class Login extends LoginBase {
 	 * @noinspection CssUnusedSymbol
 	 */
 	public function print_inline_styles(): void {
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	.woocommerce-form-login .h-captcha {
 		margin-top: 2rem;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}

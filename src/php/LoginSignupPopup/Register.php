@@ -1,6 +1,6 @@
 <?php
 /**
- * Register class file.
+ * 'Register' class file.
  *
  * @package hcaptcha-wp
  */
@@ -10,6 +10,7 @@
 
 namespace HCaptcha\LoginSignupPopup;
 
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 use WP_Error;
 
@@ -119,10 +120,7 @@ class Register {
 			$error = new WP_Error();
 		}
 
-		$error_message = hcaptcha_verify_post(
-			self::NONCE,
-			self::ACTION
-		);
+		$error_message = API::verify_post( self::NONCE, self::ACTION );
 
 		if ( null === $error_message ) {
 			return $error;
@@ -140,11 +138,12 @@ class Register {
 	 * @noinspection CssUnusedSymbol
 	 */
 	public function print_inline_styles(): void {
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	.xoo-el-form-container div[data-section="register"] .h-captcha {
 		margin-bottom: 25px;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}

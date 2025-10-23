@@ -12,6 +12,7 @@
 
 namespace HCaptcha\ElementorPro;
 
+use ElementorPro\Modules\Forms\Widgets\Login as ElementorProLogin;
 use Elementor\Element_Base;
 use HCaptcha\Abstracts\LoginBase;
 use HCaptcha\Helpers\HCaptcha;
@@ -43,7 +44,7 @@ class Login extends LoginBase {
 	 * @return void
 	 */
 	public function before_render( Element_Base $element ): void {
-		if ( ! is_a( $element, \ElementorPro\Modules\Forms\Widgets\Login::class ) ) {
+		if ( ! is_a( $element, ElementorProLogin::class ) ) {
 			return;
 		}
 
@@ -58,7 +59,7 @@ class Login extends LoginBase {
 	 * @return void
 	 */
 	public function add_elementor_login_hcaptcha( Element_Base $element ): void {
-		if ( ! is_a( $element, \ElementorPro\Modules\Forms\Widgets\Login::class ) ) {
+		if ( ! is_a( $element, ElementorProLogin::class ) ) {
 			return;
 		}
 
@@ -91,7 +92,7 @@ class Login extends LoginBase {
 
 		$signatures = (string) ob_get_clean();
 
-		$pattern     = '/(<div class="elementor-field-group.+<button type="submit")/s';
+		$pattern     = '/(<div class="elementor-field-group.+?<button type="submit")/s';
 		$replacement = $hcaptcha . $signatures . "\n$1";
 		$form        = preg_replace( $pattern, $replacement, $form );
 
@@ -106,11 +107,12 @@ class Login extends LoginBase {
 	 * @noinspection CssUnusedSymbol
 	 */
 	public function print_inline_styles(): void {
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	.elementor-widget-login .h-captcha {
 		margin-bottom: 0;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}

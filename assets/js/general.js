@@ -1,23 +1,28 @@
-/* global jQuery, hCaptcha, HCaptchaGeneralObject, kaggDialog */
+/* global jQuery, hCaptcha, hCaptchaSettingsBase, HCaptchaGeneralObject, kaggDialog */
 
 /**
  * @param HCaptchaGeneralObject.ajaxUrl
+ * @param HCaptchaGeneralObject.badJSONError
  * @param HCaptchaGeneralObject.checkConfigAction
  * @param HCaptchaGeneralObject.checkConfigNonce
+ * @param HCaptchaGeneralObject.checkConfigNotice
+ * @param HCaptchaGeneralObject.checkIPsAction
+ * @param HCaptchaGeneralObject.checkIPsNonce
+ * @param HCaptchaGeneralObject.checkingConfigMsg
+ * @param HCaptchaGeneralObject.completeHCaptchaContent
+ * @param HCaptchaGeneralObject.completeHCaptchaTitle
+ * @param HCaptchaGeneralObject.configuredAntiSpamProviderError
+ * @param HCaptchaGeneralObject.configuredAntiSpamProviders
+ * @param HCaptchaGeneralObject.modeLive
+ * @param HCaptchaGeneralObject.modeTestEnterpriseBotDetected
+ * @param HCaptchaGeneralObject.modeTestEnterpriseBotDetectedSiteKey
+ * @param HCaptchaGeneralObject.modeTestEnterpriseSafeEndUser
+ * @param HCaptchaGeneralObject.modeTestEnterpriseSafeEndUserSiteKey
+ * @param HCaptchaGeneralObject.modeTestPublisher
+ * @param HCaptchaGeneralObject.modeTestPublisherSiteKey
+ * @param HCaptchaGeneralObject.siteKey
  * @param HCaptchaGeneralObject.toggleSectionAction
  * @param HCaptchaGeneralObject.toggleSectionNonce
- * @param HCaptchaGeneralObject.modeLive
- * @param HCaptchaGeneralObject.modeTestPublisher
- * @param HCaptchaGeneralObject.modeTestEnterpriseSafeEndUser
- * @param HCaptchaGeneralObject.modeTestEnterpriseBotDetected
- * @param HCaptchaGeneralObject.siteKey
- * @param HCaptchaGeneralObject.modeTestPublisherSiteKey
- * @param HCaptchaGeneralObject.modeTestEnterpriseSafeEndUserSiteKey
- * @param HCaptchaGeneralObject.modeTestEnterpriseBotDetectedSiteKey
- * @param HCaptchaGeneralObject.checkConfigNotice
- * @param HCaptchaGeneralObject.checkingConfigMsg
- * @param HCaptchaGeneralObject.completeHCaptchaTitle
- * @param HCaptchaGeneralObject.completeHCaptchaContent
  */
 
 /* eslint-disable no-console */
@@ -34,6 +39,7 @@ const general = function( $ ) {
 	const $form = $( 'form.hcaptcha-general' );
 	const $siteKey = $( '[name="hcaptcha_settings[site_key]"]' );
 	const $secretKey = $( '[name="hcaptcha_settings[secret_key]"]' );
+	const $sampleHCaptcha = $( '#hcaptcha-options .h-captcha' );
 	const $checkConfig = $( '#check_config' );
 	const $resetNotifications = $( '#reset_notifications' );
 	const $theme = $( '[name="hcaptcha_settings[theme]"]' );
@@ -46,8 +52,13 @@ const general = function( $ ) {
 	const $configParams = $( '[name="hcaptcha_settings[config_params]"]' );
 	const $enterpriseInputs = $( '.hcaptcha-section-enterprise + table input' );
 	const $recaptchaCompatOff = $( '[name="hcaptcha_settings[recaptcha_compat_off][]"]' );
+	const $antiSpamProvider = $( '[name="hcaptcha_settings[antispam_provider]"]' );
+	const $blacklistedIPs = $( '#blacklisted_ips' );
+	const $whitelistedIPs = $( '#whitelisted_ips' );
 	const $submit = $form.find( '#submit' );
 	const modes = {};
+	const dataErrorBgColor = '#ffabaf';
+	const hcaptchaLoading = 'hcaptcha-loading';
 	let siteKeyInitVal = $siteKey.val();
 	let secretKeyInitVal = $secretKey.val();
 	let enterpriseInitValues = getEnterpriseValues();
@@ -63,6 +74,7 @@ const general = function( $ ) {
 	let consoleLogs = [];
 
 	interceptConsoleLogs();
+	checkAntiSpamProvider();
 
 	function interceptConsoleLogs() {
 		consoleLogs = [];
@@ -111,7 +123,7 @@ const general = function( $ ) {
 		const logs = [];
 
 		for ( let i = 0; i < consoleLogs.length; i++ ) {
-			// Extract strings only (some JS functions push objects to console).
+			// Extract strings only (some JS functions push objects to the console).
 			const consoleLog = consoleLogs[ i ];
 			const type = consoleLog[ 0 ];
 			const args = consoleLog[ 1 ];
@@ -152,7 +164,8 @@ const general = function( $ ) {
 
 	function clearMessage() {
 		$message.remove();
-		$( '<div id="hcaptcha-message"></div>' ).insertAfter( headerBarSelector );
+		// Concat below to avoid an inspection message.
+		$( '<div id="hcaptcha-message">' + '</div>' ).insertAfter( headerBarSelector );
 		$message = $( msgSelector );
 	}
 
@@ -178,12 +191,9 @@ const general = function( $ ) {
 
 		$( document ).trigger( 'wp-updates-notice-added' );
 
-		const $wpwrap = $( '#wpwrap' );
-		const top = $wpwrap.position().top;
-
 		$( 'html, body' ).animate(
 			{
-				scrollTop: $message.offset().top - top - parseInt( $message.css( 'margin-bottom' ) ),
+				scrollTop: $message.offset().top - hCaptchaSettingsBase.getStickyHeight(),
 			},
 			1000
 		);
@@ -198,22 +208,35 @@ const general = function( $ ) {
 	}
 
 	function hCaptchaUpdate( params = {} ) {
-		const updatedParams = Object.assign( hCaptcha.getParams(), params );
-		hCaptcha.setParams( updatedParams );
+		const globalParams = Object.assign( {}, hCaptcha.getParams(), params );
+		const isCustomThemeActive = $customThemes.prop( 'checked' );
+		const isModeLive = 'live' === $mode.val();
 
-		const sampleHCaptcha = document.querySelector( '#hcaptcha-options .h-captcha' );
-		sampleHCaptcha.innerHTML = '';
-
-		// Map the theme to the palette mode.
-		params.theme = params?.theme?.palette?.mode;
-
-		if ( ! params.theme ) {
-			// Remove the theme if it's not set.
-			delete params.theme;
+		if ( isCustomThemeActive && isModeLive ) {
+			$sampleHCaptcha.attr( 'data-theme', 'custom' );
+		} else {
+			$sampleHCaptcha.attr( 'data-theme', $theme.val() );
 		}
 
+		if (
+			( isCustomThemeActive && typeof params.theme === 'object' ) ||
+			( ! isCustomThemeActive && typeof params.theme !== 'object' )
+		) {
+			globalParams.theme = params.theme;
+		} else {
+			globalParams.theme = hCaptcha.getParams().theme;
+		}
+
+		hCaptcha.setParams( globalParams );
+
+		$sampleHCaptcha.html( '' );
+
 		for ( const key in params ) {
-			sampleHCaptcha.setAttribute( `data-${ key }`, `${ params[ key ] }` );
+			if ( typeof params[ key ] === 'object' ) {
+				continue;
+			}
+
+			$sampleHCaptcha.attr( `data-${ key }`, `${ params[ key ] }` );
 		}
 
 		hCaptcha.bindEvents();
@@ -276,12 +299,14 @@ const general = function( $ ) {
 		try {
 			configParams = JSON.parse( configParamsJson );
 		} catch ( ex ) {
-			$configParams.css( 'background-color', '#ffabaf' );
+			$configParams.css( 'background-color', dataErrorBgColor );
 			$submit.attr( 'disabled', true );
-			showErrorMessage( 'Bad JSON!' );
+			showErrorMessage( HCaptchaGeneralObject.badJSONError );
 
 			return;
 		}
+
+		$submit.attr( 'disabled', false );
 
 		configParams = deepMerge( configParams, params );
 
@@ -335,11 +360,63 @@ const general = function( $ ) {
 				showSuccessMessage( response.data );
 				$submit.attr( 'disabled', false );
 			} )
-			.fail( function( response ) {
-				showErrorMessage( response.statusText );
-			} )
+			.fail(
+				/**
+				 * @param {Object} response
+				 */
+				function( response ) {
+					showErrorMessage( response.statusText );
+				}
+			)
 			.always( function() {
 				hCaptchaUpdate();
+			} );
+	}
+
+	// Check IPs.
+	function checkIPs( $el ) {
+		const ips = $el.val();
+
+		if ( ips.trim() === '' ) {
+			return;
+		}
+
+		clearMessage();
+		$submit.attr( 'disabled', true );
+
+		const data = {
+			action: HCaptchaGeneralObject.checkIPsAction,
+			nonce: HCaptchaGeneralObject.checkIPsNonce,
+			ips,
+		};
+
+		// noinspection JSVoidFunctionReturnValueUsed,JSCheckFunctionSignatures
+		return $.post( {
+			url: HCaptchaGeneralObject.ajaxUrl,
+			data,
+			beforeSend: () => $el.parent().addClass( hcaptchaLoading ),
+		} )
+			.done( function( response ) {
+				if ( ! response.success ) {
+					$el.css( 'background-color', dataErrorBgColor );
+					showErrorMessage( response.data );
+
+					return;
+				}
+
+				$el.css( 'background-color', '' );
+				$submit.attr( 'disabled', false );
+			} )
+			.fail(
+				/**
+				 * @param {Object} response
+				 */
+				function( response ) {
+					showErrorMessage( response.statusText );
+				},
+			)
+			.always( function() {
+				$el.parent().removeClass( hcaptchaLoading );
 			} );
 	}
 
@@ -375,7 +452,7 @@ const general = function( $ ) {
 		event.preventDefault();
 
 		// Check if hCaptcha is solved.
-		if ( $( '.hcaptcha-general-sample-hcaptcha iframe' ).attr( 'data-hcaptcha-response' ) === '' ) {
+		if ( $( '.hcaptcha-general-sample-hcaptcha textarea[name="h-captcha-response"]' ).val() === '' ) {
 			kaggDialog.confirm( {
 				title: HCaptchaGeneralObject.completeHCaptchaTitle,
 				content: HCaptchaGeneralObject.completeHCaptchaContent,
@@ -385,7 +462,7 @@ const general = function( $ ) {
 						text: HCaptchaGeneralObject.OKBtnText,
 					},
 				},
-				onAction: () => window.hCaptchaReset( document.querySelector( '.hcaptcha-general-sample-hcaptcha' ) ),
+				onAction: () => window.hCaptchaBindEvents(),
 			} );
 
 			return;
@@ -457,7 +534,6 @@ const general = function( $ ) {
 
 	$configParams.on( 'focus', function() {
 		$configParams.css( 'background-color', 'unset' );
-		$submit.attr( 'disabled', false );
 	} );
 
 	function forceHttps( host ) {
@@ -516,11 +592,11 @@ const general = function( $ ) {
 
 		// Remove the existing API script.
 		document.getElementById( 'hcaptcha-api' ).remove();
+		// noinspection JSUnresolvedReference
 		delete global.hcaptcha;
 
 		// Remove sample hCaptcha.
-		const sampleHCaptcha = document.querySelector( '#hcaptcha-options .h-captcha' );
-		sampleHCaptcha.innerHTML = '';
+		$sampleHCaptcha.html( '' );
 
 		// Re-create the API script.
 		const t = document.getElementsByTagName( 'head' )[ 0 ];
@@ -560,9 +636,14 @@ const general = function( $ ) {
 					showErrorMessage( response.data );
 				}
 			} )
-			.fail( function( response ) {
-				showErrorMessage( response.statusText );
-			} );
+			.fail(
+				/**
+				 * @param {Object} response
+				 */
+				function( response ) {
+					showErrorMessage( response.statusText );
+				}
+			);
 	} );
 
 	// Prevent saving values of some form elements.
@@ -619,6 +700,31 @@ const general = function( $ ) {
 		}, params );
 
 		applyCustomThemes( params );
+	} );
+
+	function checkAntiSpamProvider() {
+		const provider = $antiSpamProvider.val();
+		const $tr = $antiSpamProvider.closest( 'tr' );
+
+		$tr.find( 'div' ).remove();
+
+		if ( HCaptchaGeneralObject.configuredAntiSpamProviders.indexOf( provider ) === -1 ) {
+			let error = HCaptchaGeneralObject.configuredAntiSpamProviderError;
+			const selectedText = $antiSpamProvider.find( 'option:selected' ).text();
+
+			error = error.replace( '%1$s', selectedText );
+
+			$tr.append( `<div>${ error }</div>` );
+		}
+	}
+
+	$antiSpamProvider.on( 'change', function( e ) {
+		checkAntiSpamProvider( e );
+	} );
+
+	// On IPs change.
+	$blacklistedIPs.add( $whitelistedIPs ).on( 'blur', function() {
+		checkIPs( $( this ) );
 	} );
 };
 

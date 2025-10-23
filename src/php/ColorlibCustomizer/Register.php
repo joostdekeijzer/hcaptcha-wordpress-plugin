@@ -1,6 +1,6 @@
 <?php
 /**
- * Register class file.
+ * 'Register' class file.
  *
  * @package hcaptcha-wp
  */
@@ -26,11 +26,12 @@ class Register extends Base {
 		switch ( $hcaptcha_size ) {
 			case 'compact':
 			case 'normal':
-				$css .= <<<CSS
+				/* language=CSS */
+				$css .= '
 	.ml-container #registerform {
 		height: unset;
 	}
-CSS;
+';
 				break;
 			case 'invisible':
 			default:

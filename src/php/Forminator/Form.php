@@ -1,6 +1,6 @@
 <?php
 /**
- * Form class file.
+ * 'Form' class file.
  *
  * @package hcaptcha-wp
  */
@@ -12,9 +12,8 @@ namespace HCaptcha\Forminator;
 
 use Forminator_CForm_Front;
 use Forminator_Front_Action;
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
-use Quform_Element_Page;
-use Quform_Form;
 
 /**
  * Class Form.
@@ -50,14 +49,14 @@ class Form {
 	 *
 	 * @var int
 	 */
-	private $form_id = 0;
+	protected $form_id = 0;
 
 	/**
 	 * Form has hCaptcha field.
 	 *
 	 * @var bool
 	 */
-	private $has_hcaptcha_field;
+	protected $has_hcaptcha_field = false;
 
 	/**
 	 * Quform constructor.
@@ -76,7 +75,7 @@ class Form {
 		add_filter( 'forminator_render_button_markup', [ $this, 'add_hcaptcha' ], 10, 2 );
 		add_filter( 'forminator_cform_form_is_submittable', [ $this, 'verify' ], 10, 3 );
 
-		add_action( 'hcap_print_hcaptcha_scripts', [ $this, 'print_hcaptcha_scripts' ] );
+		add_filter( 'hcap_print_hcaptcha_scripts', [ $this, 'print_hcaptcha_scripts' ], 0 );
 
 		add_action( 'wp_print_footer_scripts', [ $this, 'enqueue_scripts' ], 9 );
 		add_action( 'admin_enqueue_scripts', [ $this, 'admin_enqueue_scripts' ] );
@@ -133,13 +132,13 @@ class Form {
 
 		foreach ( $module_object->fields as $key => $field ) {
 			if ( isset( $field->raw['captcha_provider'] ) && 'hcaptcha' === $field->raw['captcha_provider'] ) {
-				// Remove hCaptcha field from the form to prevent it from verifying by Forminator.
+				// Remove the hCaptcha field from the form to prevent it from verifying by Forminator.
 				unset( $module_object->fields[ $key ] );
 				break;
 			}
 		}
 
-		$error_message = hcaptcha_get_verify_message( self::NONCE, self::ACTION );
+		$error_message = API::verify_post( self::NONCE, self::ACTION );
 
 		if ( null !== $error_message ) {
 			return [
@@ -152,13 +151,13 @@ class Form {
 	}
 
 	/**
-	 * Filter print hCaptcha scripts status and return true on Forminator form wizard page.
+	 * Filter printed hCaptcha scripts status and return true on Forminator form wizard page.
 	 *
 	 * @param bool|mixed $status Print scripts status.
 	 *
-	 * @return bool|mixed
+	 * @return bool
 	 */
-	public function print_hcaptcha_scripts( $status ) {
+	public function print_hcaptcha_scripts( $status ): bool {
 		$forminator_api_handle = 'forminator-hcaptcha';
 
 		wp_dequeue_script( $forminator_api_handle );
@@ -168,9 +167,7 @@ class Form {
 			return true;
 		}
 
-		$is_forminator_wizard_page = $this->is_forminator_admin_page();
-
-		return $is_forminator_wizard_page ? true : $status;
+		return $this->is_forminator_admin_page() || $status;
 	}
 
 	/**
@@ -274,7 +271,7 @@ class Form {
 	 *
 	 * @return bool
 	 */
-	private function is_forminator_admin_page(): bool {
+	protected function is_forminator_admin_page(): bool {
 		if ( ! is_admin() ) {
 			return false;
 		}
@@ -282,7 +279,9 @@ class Form {
 		$screen = get_current_screen();
 
 		if ( ! $screen ) {
+			// @codeCoverageIgnoreStart
 			return false;
+			// @codeCoverageIgnoreEnd
 		}
 
 		$forminator_admin_pages = [

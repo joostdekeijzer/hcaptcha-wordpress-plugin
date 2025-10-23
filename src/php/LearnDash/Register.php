@@ -1,12 +1,13 @@
 <?php
 /**
- * Register class file.
+ * 'Register' class file.
  *
  * @package hcaptcha-wp
  */
 
 namespace HCaptcha\LearnDash;
 
+use HCaptcha\Helpers\API;
 use HCaptcha\Helpers\HCaptcha;
 use WP_Error;
 
@@ -18,12 +19,12 @@ class Register {
 	/**
 	 * Nonce action.
 	 */
-	private const ACTION = 'hcaptcha_theme_my_login_register';
+	private const ACTION = 'hcaptcha_learn_dash_register';
 
 	/**
 	 * Nonce name.
 	 */
-	private const NONCE = 'hcaptcha_theme_my_login_register_nonce';
+	private const NONCE = 'hcaptcha_learn_dash_register_nonce';
 
 	/**
 	 * Constructor.
@@ -80,10 +81,7 @@ class Register {
 			return $errors;
 		}
 
-		$error_message = hcaptcha_verify_post(
-			self::NONCE,
-			self::ACTION
-		);
+		$error_message = API::verify_post( self::NONCE, self::ACTION );
 
 		return HCaptcha::add_error_message( $errors, $error_message );
 	}
@@ -106,11 +104,12 @@ class Register {
 	 * @noinspection CssUnusedSymbol
 	 */
 	public function print_inline_styles(): void {
-		$css = <<<CSS
+		/* language=CSS */
+		$css = '
 	#learndash_registerform .h-captcha {
 		margin-bottom: 0;
 	}
-CSS;
+';
 
 		HCaptcha::css_display( $css );
 	}

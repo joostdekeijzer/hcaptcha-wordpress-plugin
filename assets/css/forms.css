@@ -44,9 +44,22 @@
 	aspect-ratio: 3/1;
 }
 
-@media (max-width: 600px) {
+#hcaptcha-chart-message {
+	padding: 5px 10px;
+	border: 1px solid #c3c4c7;
+	box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+	color: #50575e;
+	background-color: #f6f7f7;
+	text-align: center;
+}
+
+@media (max-width: 782px) {
 	#hcaptcha-options #hcaptcha-forms-wrap table tbody tr td {
-		padding: 3px 8px 3px 35%;
+		padding-block-start: 3px;
+		padding-inline-end: 8px;
+		padding-block-end: 3px;
+		padding-inline-start: 35%;
+		min-height: 19.5px;
 	}
 
 	#hcaptcha-options #hcaptcha-forms-wrap table tbody tr td.column-primary {
